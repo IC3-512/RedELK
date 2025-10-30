@@ -12,25 +12,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Prepare
         id: prepare
         run: |
-          if [[ "x$DOCKER_REPO" == "x" ]]; then
-            DOCKER_REPO=outflanknl
-          fi
+          DOCKER_REPO="${DOCKER_REPO:-outflanknl}"
           DOCKER_IMAGE="${DOCKER_REPO}/redelk-base"
           echo ::set-output name=docker_image::${DOCKER_IMAGE}
           echo ::set-output name=docker_repo::${DOCKER_REPO}
           echo ::set-output name=build_args::BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             VCS_REF=${GITHUB_SHA::8}
         env:
-          DOCKER_REPO: ${{ secrets.DOCKER_REPO }}
+          DOCKER_REPO: ${{ vars.DOCKER_REPO }}
 
       - name: Docker meta
         id: docker_meta
-        uses: crazy-max/ghaction-docker-meta@v1
+        uses: docker/metadata-action@v4
         with:
           images: ${{ steps.prepare.outputs.docker_image }}
 
@@ -44,7 +42,7 @@ jobs:
         uses: docker/login-action@v1
         if: ${{ github.event_name != 'pull_request' }}
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
+          username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Cache Docker layers
