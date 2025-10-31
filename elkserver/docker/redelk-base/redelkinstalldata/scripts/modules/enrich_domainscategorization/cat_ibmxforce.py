@@ -13,8 +13,8 @@ Authors:
 
 import logging
 import traceback
-import requests
 
+import requests
 from config import enrich
 from modules.helpers import get_value
 

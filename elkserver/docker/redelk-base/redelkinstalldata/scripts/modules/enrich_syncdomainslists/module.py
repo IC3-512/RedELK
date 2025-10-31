@@ -8,15 +8,15 @@ Syncs domainslists data between ES and legacy config files
 Authors:
 - Lorenzo Bernardi (@fastlorenzo)
 """
-import logging
 import datetime
+import logging
 import os.path
 
 from modules.helpers import (
+    es,
     get_initial_alarm_result,
     get_query,
     get_value,
-    es,
     match_domain_name,
 )
 

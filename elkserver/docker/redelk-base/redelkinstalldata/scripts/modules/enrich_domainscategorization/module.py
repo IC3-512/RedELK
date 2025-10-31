@@ -8,21 +8,15 @@ This script enriches domains lists with categorization data
 Authors:
 - Lorenzo Bernardi (@fastlorenzo)
 """
+import copy
 import datetime
 import logging
-import copy
 
 # from modules.enrich_domainscategorization.cat_bluecoat import Bluecoat
 from modules.enrich_domainscategorization.cat_ibmxforce import IBMXForce
 from modules.enrich_domainscategorization.cat_mcafee import MCafee
 from modules.enrich_domainscategorization.cat_vt import VT
-
-from modules.helpers import (
-    get_initial_alarm_result,
-    get_value,
-    raw_search,
-    es,
-)
+from modules.helpers import es, get_initial_alarm_result, get_value, raw_search
 
 info = {
     "version": 0.1,

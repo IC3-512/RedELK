@@ -16,13 +16,13 @@ import logging
 import os
 import traceback
 
-from config import alarms, LOGLEVEL, notifications
+from config import LOGLEVEL, alarms, notifications
 from modules.helpers import (
     add_alarm_data,
     group_hits,
     module_did_run,
-    set_tags,
     module_should_run,
+    set_tags,
 )
 
 MODULES_PATH = "./modules/"

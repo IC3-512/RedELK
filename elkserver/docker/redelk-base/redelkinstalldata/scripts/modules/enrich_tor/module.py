@@ -9,19 +9,19 @@ Authors:
 - Outflank B.V. / Mark Bergman (@xychix)
 - Lorenzo Bernardi (@fastlorenzo)
 """
-import logging
 import datetime
-import requests
-from elasticsearch import helpers
+import logging
 
+import requests
+from config import enrich
+from elasticsearch import helpers
 from modules.helpers import (
-    get_initial_alarm_result,
     es,
+    get_initial_alarm_result,
+    get_last_run,
     get_value,
     raw_search,
-    get_last_run,
 )
-from config import enrich
 
 info = {
     "version": 0.1,

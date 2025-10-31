@@ -14,10 +14,9 @@ import logging
 import os
 import re
 
-from elasticsearch import Elasticsearch
-import urllib3
-
 import config
+import urllib3
+from elasticsearch import Elasticsearch
 
 # Domain name regex pattern
 domain_pattern = re.compile(

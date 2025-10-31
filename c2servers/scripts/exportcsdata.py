@@ -9,10 +9,11 @@
 #
 
 from argparse import ArgumentParser, RawTextHelpFormatter
-from javaobj import loads
 from os import path
-from sys import argv
 from pprint import pprint
+from sys import argv
+
+from javaobj import loads
 
 
 def print_tsv(data_type, data, prefix):

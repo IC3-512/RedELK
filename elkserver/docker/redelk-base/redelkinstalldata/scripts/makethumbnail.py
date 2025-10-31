@@ -11,9 +11,10 @@ Authors:
 - Lorenzo Bernardi (@fastlorenzo)
 """
 
-import sys
-import os
 import logging
+import os
+import sys
+
 from PIL import Image
 
 logger = logging.getLogger("makethumbnail")
