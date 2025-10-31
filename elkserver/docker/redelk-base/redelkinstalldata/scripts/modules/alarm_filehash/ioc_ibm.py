@@ -113,7 +113,6 @@ class IBM:
 
                 if ibm_result is not None:
                     if isinstance(ibm_result, type({})) and "malware" in ibm_result:
-
                         # Get first submission date
                         first_submitted_date = get_value(
                             "malware.created", ibm_results, None
