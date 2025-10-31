@@ -21,5 +21,12 @@ jobs:
       - name: Check files using black formatter
         uses: datadog/action-py-black-formatter@v2.5
         with:
-          check_mode: true
-          additional_args: "--diff --color elkserver/docker/redelk-base/redelkinstalldata/scripts"
+          check_mode: false
+          additional_args: "-t py36 elkserver/docker/redelk-base/redelkinstalldata/scripts"
+
+      - name: Commit & Push changes
+        uses: Andro999b/push@v1.3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          message: "style: autoformatted code with black"
+          branch: "develop"
