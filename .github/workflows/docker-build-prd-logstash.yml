@@ -17,16 +17,11 @@ jobs:
       - name: Prepare
         id: prepare
         run: |
-          if [[ "x$DOCKER_REPO" == "x" ]]; then
-            DOCKER_REPO=outflanknl
-          fi
-          DOCKER_IMAGE="${DOCKER_REPO}/redelk-logstash"
           echo ::set-output name=docker_image::${DOCKER_IMAGE}
-          echo ::set-output name=docker_repo::${DOCKER_REPO}
           echo ::set-output name=build_args::BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             VCS_REF=${GITHUB_SHA::8}
         env:
-          DOCKER_REPO: ${{ vars.DOCKER_REPO }}
+          DOCKER_IMAGE: ${{ vars.DOCKER_REPO || 'outflanknl' }}/redelk-logstash
 
       - name: Docker meta
         id: docker_meta
