@@ -190,9 +190,9 @@ class Module:
                             [],
                         ),
                     }
-                domains[domain]["_source"]["domainslist"][
-                    "categorization"
-                ] = checked_domains[domain]["categorization"]
+                domains[domain]["_source"]["domainslist"]["categorization"] = (
+                    checked_domains[domain]["categorization"]
+                )
 
                 es.update(
                     index=domains[domain]["_index"],

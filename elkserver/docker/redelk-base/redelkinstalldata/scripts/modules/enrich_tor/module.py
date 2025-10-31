@@ -115,7 +115,8 @@ class Module:
 
     def enrich_tor(self, iplist):  # pylint:disable=no-self-use
         """Get all lines in redirtraffic that have not been enriched with 'enrich_iplist' or 'enrich_tor'
-        Filter documents that were before the last run time of enrich_iplist (to avoid race condition)"""
+        Filter documents that were before the last run time of enrich_iplist (to avoid race condition)
+        """
         iplist_lastrun = get_last_run("enrich_iplists")
         query = {
             "sort": [{"@timestamp": {"order": "desc"}}],
