@@ -15,6 +15,7 @@ import requests
 
 from modules.helpers import get_value
 
+
 # Rate limiting:
 # Free Tier (Non-Commercial Use Only): The free tier allows usage of up to 5,000 records per month
 # Commercial API - Paid Tier (Commercial Use): Usage is priced by the number of data records that you access, which are sold in packs of 10,000 records per month
