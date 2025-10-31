@@ -17,9 +17,7 @@ from javaobj import loads
 
 
 def print_tsv(data_type, data, prefix):
-
     with open(prefix + "_" + data_type + ".tsv", "w") as output_file:
-
         ## Cred-it where it's due
         if data_type == "credentials":
             print("[+] Parsing credentials")

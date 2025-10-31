@@ -88,7 +88,6 @@ class Module:
 
         toadd = []
         for domaine, doc in es_domainslist:
-
             # Check if ES domain is in config file
             found = [item for item in cfg_domainslist if domaine in item]
 

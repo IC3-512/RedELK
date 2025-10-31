@@ -20,7 +20,6 @@ from PIL import Image
 logger = logging.getLogger("makethumbnail")
 
 try:
-
     path = sys.argv[1]
     BAS_HEIGHT = 300
     for root, dirs, files in os.walk(path):

@@ -388,7 +388,6 @@ def check_args():
 
 
 if __name__ == "__main__":
-
     args = check_args()
 
     exporter = KibanaExporter(args)

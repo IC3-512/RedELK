@@ -103,7 +103,6 @@ class Module:
             # Loop through all enabled engines and check the domain
             for engine in self.enabled_engines:
                 try:
-
                     self.logger.debug("Checking %s with %s", domain, engine)
                     if engine == "vt":
                         result = copy.deepcopy(vt.check_domain(domain))
@@ -184,9 +183,9 @@ class Module:
                             [],
                         ),
                     }
-                domains[domain]["_source"]["domainslist"]["categorization"] = (
-                    checked_domains[domain]["categorization"]
-                )
+                domains[domain]["_source"]["domainslist"][
+                    "categorization"
+                ] = checked_domains[domain]["categorization"]
 
                 es.update(
                     index=domains[domain]["_index"],
