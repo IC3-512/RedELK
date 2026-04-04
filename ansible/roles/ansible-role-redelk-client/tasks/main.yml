@@ -1,0 +1,58 @@
+---
+- name: Ensure required connector variables are set
+  ansible.builtin.assert:
+    that:
+      - redelk_attack_scenario is defined
+      - redelk_logstash_endpoint is defined
+    fail_msg: "Set redelk_attack_scenario and redelk_logstash_endpoint in inventory.yml."
+
+- name: Set connector package for c2servers
+  ansible.builtin.set_fact:
+    redelk_client_package: c2servers.tgz
+    redelk_client_subdir: c2servers
+    redelk_client_installer: ./install-c2server.sh
+  when: "'c2servers' in group_names"
+
+- name: Set connector package for redirs
+  ansible.builtin.set_fact:
+    redelk_client_package: redirs.tgz
+    redelk_client_subdir: redirs
+    redelk_client_installer: ./install-redir.sh
+  when: "'redirs' in group_names"
+
+- name: Ensure client target host type is supported
+  ansible.builtin.assert:
+    that:
+      - redelk_client_package is defined
+      - redelk_client_subdir is defined
+      - redelk_client_installer is defined
+    fail_msg: "ansible-role-redelk-client only supports hosts in 'c2servers' or 'redirs'."
+
+- name: Ensure deployment directory exists
+  ansible.builtin.file:
+    path: "{{ redelk_remote_base_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Upload and extract connector package
+  ansible.builtin.unarchive:
+    src: "{{ redelk_local_repo_path }}/{{ redelk_client_package }}"
+    dest: "{{ redelk_remote_base_path }}"
+    mode: "0755"
+
+- name: Run connector installer
+  ansible.builtin.command:
+    argv:
+      - "{{ redelk_client_installer }}"
+      - "{{ redelk_identifier | default(inventory_hostname) }}"
+      - "{{ redelk_attack_scenario }}"
+      - "{{ redelk_logstash_endpoint }}"
+  args:
+    chdir: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}"
+    creates: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}/.ansible_redelk_installed"
+
+- name: Create idempotency marker
+  ansible.builtin.file:
+    path: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}/.ansible_redelk_installed"
+    state: touch
+    mode: "0600"

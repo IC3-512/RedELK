@@ -1,0 +1,64 @@
+---
+- hosts: all
+  gather_facts: false
+  tags:
+    - pre
+  pre_tasks:
+    - name: Check known_hosts for all hosts
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -F
+          - "{{ ansible_host }}"
+      delegate_to: localhost
+      register: has_entry_in_known_hosts_file
+      changed_when: false
+      failed_when: false
+
+    - name: Ignore host key on first run
+      when: has_entry_in_known_hosts_file.rc == 1
+      ansible.builtin.set_fact:
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+    - name: Delayed gathering of facts
+      ansible.builtin.setup:
+
+    - name: Optionally generate RedELK packages on control node
+      ansible.builtin.command:
+        cmd: "./initial-setup.sh {{ redelk_openssl_config_path }}"
+      args:
+        chdir: "{{ redelk_local_repo_path }}"
+      delegate_to: localhost
+      run_once: true
+      when: redelk_generate_packages | bool
+      changed_when: true
+
+  roles:
+    - name: ssh
+      tags: ssh
+
+- hosts: elkservers
+  roles:
+    - name: docker
+      tags: redelk-server
+    - name: ansible-role-redelk-server
+      tags: redelk-server
+
+- hosts: c2servers
+  roles:
+    - name: docker
+      tags: c2server
+    - name: c2server
+      tags: c2server
+    - name: ansible-role-redelk-client
+      when: deploy_redelk == true
+      tags: redelk-client
+
+- hosts: redirs
+  roles:
+    - name: redir
+      tags: redir
+    - name: ansible-role-redelk-client
+      when: deploy_redelk == true
+      tags: redelk-client
+

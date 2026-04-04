@@ -31,6 +31,8 @@ Check the [wiki](https://github.com/outflanknl/RedELK/wiki) for manual installat
 - [RedELK Client playbook](https://github.com/fastlorenzo/redelk-client) - maintained by one of RedELK's developers
 - [ansible-redelk](https://github.com/curi0usJack/ansible-redelk) - maintained by curi0usJack/TrustedSec
 
+A minimal public Ansible example is included in this repository under [`ansible/`](./ansible/README.md).
+
 # Conceptual overview #
 
 Here's a conceptual overview of how RedELK works.

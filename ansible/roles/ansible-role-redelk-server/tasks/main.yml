@@ -1,0 +1,25 @@
+---
+- name: Ensure deployment directory exists
+  ansible.builtin.file:
+    path: "{{ redelk_remote_base_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Upload and extract ELK server package
+  ansible.builtin.unarchive:
+    src: "{{ redelk_local_repo_path }}/elkserver.tgz"
+    dest: "{{ redelk_remote_base_path }}"
+    mode: "0755"
+
+- name: Run ELK server installer
+  ansible.builtin.command:
+    cmd: "{{ redelk_elk_install_command }}"
+  args:
+    chdir: "{{ redelk_remote_base_path }}/elkserver"
+    creates: "{{ redelk_remote_base_path }}/elkserver/.ansible_redelk_installed"
+
+- name: Create idempotency marker
+  ansible.builtin.file:
+    path: "{{ redelk_remote_base_path }}/elkserver/.ansible_redelk_installed"
+    state: touch
+    mode: "0600"
