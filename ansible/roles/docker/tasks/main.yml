@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: MIT-0
+---
+- name: Ensure target is Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_distribution == "Ubuntu"
+    fail_msg: "This role currently supports Ubuntu only."
+
+- name: Ensure Ubuntu release is supported by this role
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution_release in ['focal', 'jammy', 'noble', 'questing', 'resolute']
+    fail_msg: >-
+      Unsupported Ubuntu release '{{ ansible_distribution_release }}'.
+      Supported by this role: focal (legacy), jammy, noble, questing, resolute.
+
+- name: Warn when using Ubuntu 20.04 (EOL)
+  ansible.builtin.debug:
+    msg: >-
+      Ubuntu 20.04 (focal) is EOL. This role still installs Docker for focal,
+      but assumes the host apt repositories are already correctly configured.
+  when: ansible_distribution_release == "focal"
+
+- name: Remove conflicting packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - docker-compose-v2
+      - docker-doc
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install Docker prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Docker apt signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types:
+      - deb
+    uris:
+      - https://download.docker.com/linux/ubuntu
+    suites:
+      - "{{ ansible_distribution_release }}"
+    components:
+      - stable
+    architectures:
+      - amd64
+    signed_by: /etc/apt/keyrings/docker.asc
+    state: present
+
+- name: Update apt cache after adding Docker repository
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+  notify: Restart docker service
+
+- name: Ensure Docker service is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started

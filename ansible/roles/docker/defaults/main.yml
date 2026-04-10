@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: MIT-0
+---
+# No role defaults. Docker installation behavior is intentionally hardcoded.
