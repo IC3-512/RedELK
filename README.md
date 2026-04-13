@@ -3,6 +3,7 @@
 [![Build docker jupyter image (dev)](https://github.com/outflanknl/RedELK/actions/workflows/docker-build-dev-jupyter.yml/badge.svg?branch=develop)](https://github.com/outflanknl/RedELK/actions/workflows/docker-build-dev-jupyter.yml)
 [![Build docker kibana image (dev)](https://github.com/outflanknl/RedELK/actions/workflows/docker-build-dev-kibana.yml/badge.svg?branch=develop)](https://github.com/outflanknl/RedELK/actions/workflows/docker-build-dev-kibana.yml)
 [![Build docker logstash image (dev)](https://github.com/outflanknl/RedELK/actions/workflows/docker-build-dev-logstash.yml/badge.svg?branch=develop)](https://github.com/outflanknl/RedELK/actions/workflows/docker-build-dev-logstash.yml)
+[![Molecule](https://github.com/outflanknl/RedELK/actions/workflows/molecule.yml/badge.svg?branch=develop)](https://github.com/outflanknl/RedELK/actions/workflows/molecule.yml)
 
 # RedELK
 
