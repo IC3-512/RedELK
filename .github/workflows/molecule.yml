@@ -24,7 +24,6 @@ jobs:
             collections_file: molecule/redelk/collections.yml
     env:
       ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible/.ansible/collections
-      ANSIBLE_COLLECTIONS_SCAN_SYS_PATH: "false"
 
     steps:
       - name: Checkout code
@@ -48,6 +47,13 @@ jobs:
         run: |
           mkdir -p .ansible/collections
           ansible-galaxy collection install -r "${{ matrix.collections_file }}" -p .ansible/collections
+
+      - name: Validate Ansible collection resolution
+        working-directory: ansible
+        run: |
+          ansible-galaxy collection list community.docker
+          ansible-galaxy collection list ansible.posix
+          ansible-doc community.docker.docker_container > /dev/null
 
       - name: Run Molecule scenario
         working-directory: ansible

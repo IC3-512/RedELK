@@ -28,7 +28,7 @@ provisioner:
   name: ansible
   env:
     ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/roles
-    ANSIBLE_COLLECTIONS_PATH: .ansible/collections
+    ANSIBLE_COLLECTIONS_PATH: ${MOLECULE_PROJECT_DIRECTORY}/.ansible/collections
     ANSIBLE_COLLECTIONS_SCAN_SYS_PATH: "true"
   config_options:
     defaults:
