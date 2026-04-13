@@ -24,7 +24,6 @@ jobs:
             collections_file: molecule/redelk/collections.yml
     env:
       ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible/.ansible/collections
-      ANSIBLE_COLLECTIONS_PATHS: ${{ github.workspace }}/ansible/.ansible/collections:/usr/share/ansible/collections
       ANSIBLE_COLLECTIONS_SCAN_SYS_PATH: "false"
 
     steps:
