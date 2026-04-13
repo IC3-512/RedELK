@@ -1,0 +1,23 @@
+---
+- name: Verify Docker role
+  hosts: docker_hosts
+  gather_facts: false
+  tasks:
+    - name: Check docker reports version
+      ansible.builtin.command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Assert docker version output is present
+      ansible.builtin.assert:
+        that:
+          - "'Docker version' in docker_version.stdout"
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert docker service is active
+      ansible.builtin.assert:
+        that:
+          - "'docker.service' in ansible_facts.services"
+          - ansible_facts.services['docker.service'].state == 'running'

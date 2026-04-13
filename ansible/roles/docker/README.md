@@ -28,7 +28,8 @@ Configuration
 
 This role intentionally exposes no user-tunable variables for Docker packages,
 repository settings, or service state. Values are hardcoded to keep behavior
-consistent across hosts. The role assumes Ubuntu on `amd64`.
+consistent across hosts. The role derives apt architecture from system facts
+(for example, `x86_64` -> `amd64`, `aarch64` -> `arm64`).
 
 Example Playbook
 ----------------

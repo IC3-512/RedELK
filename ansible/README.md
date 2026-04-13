@@ -69,6 +69,34 @@ cd ansible
 ansible-playbook -i inventory.yml playbook.yml
 ```
 
+## Molecule Testing
+
+A Molecule split setup is available:
+- `molecule/docker`: isolated test of the `docker` role
+- `molecule/redelk`: test of RedELK server/client roles with fixture installers
+
+Both scenarios use privileged Ubuntu containers (Docker-in-Docker capable).
+
+Run Docker-role tests:
+
+```bash
+cd ansible
+ansible-galaxy collection install -r molecule/docker/collections.yml -p .ansible/collections
+molecule test -s docker
+```
+
+Run RedELK-role tests:
+
+```bash
+cd ansible
+ansible-galaxy collection install -r molecule/redelk/collections.yml -p .ansible/collections
+molecule test -s redelk
+```
+
+Requirements:
+- local Docker daemon running
+- ability to run privileged containers
+
 ## Playbook Behavior
 
 `playbook.yml` runs these plays:

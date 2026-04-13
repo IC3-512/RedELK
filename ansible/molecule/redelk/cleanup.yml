@@ -1,0 +1,13 @@
+---
+- name: Cleanup Molecule fixture archives
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
+    fixtures_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/fixtures"
+  tasks:
+    - name: Remove fixture directory
+      ansible.builtin.file:
+        path: "{{ fixtures_dir }}"
+        state: absent

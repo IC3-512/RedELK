@@ -1,0 +1,76 @@
+---
+- name: Build fixture archives for RedELK role tests
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
+    fixtures_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/fixtures"
+  tasks:
+    - name: Reset fixture directory
+      ansible.builtin.file:
+        path: "{{ fixtures_dir }}"
+        state: absent
+
+    - name: Create fixture directory
+      ansible.builtin.file:
+        path: "{{ fixtures_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Create fixture source directories
+      ansible.builtin.file:
+        path: "{{ fixtures_dir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - elkserver
+        - c2servers
+        - redirs
+
+    - name: Write mock ELK installer
+      ansible.builtin.copy:
+        dest: "{{ fixtures_dir }}/elkserver/install-elkserver.sh"
+        mode: "0755"
+        content: |
+          #!/usr/bin/env sh
+          set -eu
+          printf '%s\n' "$@" > ./installer-args.txt
+
+    - name: Write mock C2 installer
+      ansible.builtin.copy:
+        dest: "{{ fixtures_dir }}/c2servers/install-c2server.sh"
+        mode: "0755"
+        content: |
+          #!/usr/bin/env sh
+          set -eu
+          [ "$#" -eq 3 ]
+          printf '%s\n' "$1" "$2" "$3" > ./installer-args.txt
+
+    - name: Write mock redir installer
+      ansible.builtin.copy:
+        dest: "{{ fixtures_dir }}/redirs/install-redir.sh"
+        mode: "0755"
+        content: |
+          #!/usr/bin/env sh
+          set -eu
+          [ "$#" -eq 3 ]
+          printf '%s\n' "$1" "$2" "$3" > ./installer-args.txt
+
+    - name: Create fixture tarballs
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -czf
+          - "{{ fixtures_dir }}/{{ item.dest }}"
+          - -C
+          - "{{ fixtures_dir }}"
+          - "{{ item.src }}"
+      changed_when: true
+      loop:
+        - src: elkserver
+          dest: elkserver.tgz
+        - src: c2servers
+          dest: c2servers.tgz
+        - src: redirs
+          dest: redirs.tgz

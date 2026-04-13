@@ -52,7 +52,8 @@
     creates: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}/.ansible_redelk_installed"
 
 - name: Create idempotency marker
-  ansible.builtin.file:
-    path: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}/.ansible_redelk_installed"
-    state: touch
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}/.ansible_redelk_installed"
     mode: "0600"
+    force: false

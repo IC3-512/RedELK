@@ -1,0 +1,55 @@
+name: Molecule
+
+on:
+  push:
+    paths:
+      - "ansible/**"
+      - ".github/workflows/molecule.yml"
+  pull_request:
+    paths:
+      - "ansible/**"
+      - ".github/workflows/molecule.yml"
+
+jobs:
+  molecule:
+    name: Molecule (${{ matrix.scenario }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: docker
+            collections_file: molecule/docker/collections.yml
+          - scenario: redelk
+            collections_file: molecule/redelk/collections.yml
+    env:
+      ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible/.ansible/collections
+      ANSIBLE_COLLECTIONS_PATHS: ${{ github.workspace }}/ansible/.ansible/collections:/usr/share/ansible/collections
+      ANSIBLE_COLLECTIONS_SCAN_SYS_PATH: "false"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Molecule dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            "ansible-core==2.20.4" \
+            "molecule==26.3.0" \
+            "molecule-plugins[docker]==25.8.12"
+
+      - name: Install pinned Ansible collections for scenario
+        working-directory: ansible
+        run: |
+          mkdir -p .ansible/collections
+          ansible-galaxy collection install -r "${{ matrix.collections_file }}" -p .ansible/collections
+
+      - name: Run Molecule scenario
+        working-directory: ansible
+        run: molecule test -s "${{ matrix.scenario }}"

@@ -1,0 +1,42 @@
+---
+- name: Verify ELK server
+  hosts: elkservers
+  gather_facts: false
+  tasks:
+    - name: Check ELK idempotency marker
+      ansible.builtin.stat:
+        path: /opt/redelk/elkserver/.ansible_redelk_installed
+      register: elk_marker
+
+    - name: Assert ELK marker exists
+      ansible.builtin.assert:
+        that:
+          - elk_marker.stat.exists
+
+- name: Verify C2 connector
+  hosts: c2servers
+  gather_facts: false
+  tasks:
+    - name: Check C2 idempotency marker
+      ansible.builtin.stat:
+        path: /opt/redelk/c2servers/.ansible_redelk_installed
+      register: c2_marker
+
+    - name: Assert C2 marker exists
+      ansible.builtin.assert:
+        that:
+          - c2_marker.stat.exists
+
+- name: Verify redirector connector
+  hosts: redirs
+  gather_facts: false
+  tasks:
+    - name: Check redir idempotency marker
+      ansible.builtin.stat:
+        path: /opt/redelk/redirs/.ansible_redelk_installed
+      register: redir_marker
+
+    - name: Assert redir marker exists
+      ansible.builtin.assert:
+        that:
+          - redir_marker.stat.exists
