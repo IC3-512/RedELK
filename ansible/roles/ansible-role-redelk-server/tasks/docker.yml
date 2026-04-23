@@ -1,0 +1,8 @@
+---
+- name: Ensure Docker CLI is available
+  ansible.builtin.command: docker --version
+  changed_when: false
+
+- name: Ensure Docker Compose is available
+  ansible.builtin.shell: docker compose version >/dev/null 2>&1 || docker-compose --version >/dev/null 2>&1
+  changed_when: false

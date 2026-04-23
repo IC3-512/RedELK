@@ -1,0 +1,21 @@
+---
+redelk_local_repo_path: "{{ playbook_dir | dirname }}"
+redelk_remote_base_path: /opt/redelk
+redelk_elk_install_command: "./install-elkserver.sh limited"
+redelk_install_type: ""
+redelk_extract_server_package: true
+redelk_force_extract_server_package: false
+redelk_compose_project_name: redelk
+redelk_docker_log_max_size: 200m
+redelk_docker_log_max_files: 1
+redelk_redelk_username: redelk
+redelk_loglevel: WARNING
+redelk_alarm_interval: 3600
+redelk_alarm_temp_dir: /tmp
+redelk_letsencrypt_enabled: false
+redelk_external_domain: ""
+redelk_letsencrypt_email: ""
+redelk_letsencrypt_staging: "0"
+redelk_self_signed_cert_dirname: noletsencrypt
+redelk_vm_max_map_count: 262144
+redelk_start_containers: true

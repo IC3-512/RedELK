@@ -26,13 +26,60 @@ Check the [wiki](https://github.com/outflanknl/RedELK/wiki) for info on usage or
 
 # Installation
 
-Check the [wiki](https://github.com/outflanknl/RedELK/wiki) for manual installation manual. There are also Ansible playbooks maintained by others:
+RedELK currently supports two deployment paths:
+
+1. **Script-based deployment**
+   - best fit when you want to install RedELK manually without Ansible
+   - uses the original shell scripts that are still included in this repository
+2. **Ansible-based deployment**
+   - best fit when you want repeatable infrastructure-as-code deployments
+   - uses the public Ansible example included in [`ansible/`](./ansible/README.md)
+
+## Script-based deployment
+
+The legacy scripts remain available for standalone installs:
+
+- `initial-setup.sh`: prepares certificates, SSH keys, and distributable archives
+- `elkserver/install-elkserver.sh`: installs the RedELK server stack on the ELK host
+- `c2servers/install-c2server.sh`: installs the RedELK connector on a C2 host
+- `redirs/install-redir.sh`: installs the RedELK connector on a redirector
+
+Typical flow:
+
+1. Prepare `certs/config.cnf` from `certs/config.cnf.example`.
+2. Run `./initial-setup.sh certs/config.cnf` on the control workstation.
+3. Copy `elkserver.tgz`, `c2servers.tgz`, and `redirs.tgz` to the relevant hosts.
+4. Extract each archive on its target host.
+5. Run the local installer script on each host.
+
+Script usage:
+
+- ELK server:
+  - `./install-elkserver.sh limited`
+  - `./install-elkserver.sh`
+- C2 server:
+  - `./install-c2server.sh <identifier> <attack_scenario> <logstash_host:5044>`
+- Redirector:
+  - `./install-redir.sh <identifier> <attack_scenario> <logstash_host:5044>`
+
+Check the [wiki](https://github.com/outflanknl/RedELK/wiki) and the script comments for additional manual-install context.
+
+## Ansible-based deployment
+
+The public Ansible example in [`ansible/`](./ansible/README.md) is the IaC path in this repository.
+
+It keeps the same RedELK packaging model, but automates:
+
+- package preparation on the control node
+- server deployment on `elkservers`
+- connector deployment on `c2servers`
+- connector deployment on `redirs`
+
+There are also community-maintained Ansible projects:
 
 - [RedELK Server playbook](https://github.com/fastlorenzo/redelk-server) - maintained by one of RedELK's developers
 - [RedELK Client playbook](https://github.com/fastlorenzo/redelk-client) - maintained by one of RedELK's developers
 - [ansible-redelk](https://github.com/curi0usJack/ansible-redelk) - maintained by curi0usJack/TrustedSec
-
-A minimal public Ansible example is included in this repository under [`ansible/`](./ansible/README.md).
 
 # Conceptual overview #
 

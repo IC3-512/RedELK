@@ -1,0 +1,126 @@
+{{ ansible_managed | comment }}
+
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  fields_under_root: true
+  paths:
+    - /root/cobaltstrike/server/logs/*/events.log
+  fields:
+    infra:
+      attack_scenario: {{ redelk_attack_scenario }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: events
+
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  fields_under_root: true
+  paths:
+    - /root/cobaltstrike/server/logs/*/weblog*
+  fields:
+    infra:
+      attack_scenario: {{ redelk_attack_scenario }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: weblog
+
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  fields_under_root: true
+  paths:
+    - /root/cobaltstrike/server/logs/*/downloads.log
+  fields:
+    infra:
+      attack_scenario: {{ redelk_attack_scenario }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: downloads
+
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  fields_under_root: true
+  paths:
+    - /root/cobaltstrike/server/data/export_credentials.tsv
+  fields:
+    infra:
+      attack_scenario: {{ redelk_attack_scenario }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: credentials
+
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  fields_under_root: true
+  paths:
+    - /root/cobaltstrike/server/logs/*/*/beacon_*.log
+    - /root/cobaltstrike/server/logs/*/*/ssh_*.log
+  multiline.pattern: '(^\d\d\/\d\d\s\d\d\:\d\d\:\d\d\sUTC\s\[)|(^\d\d\/\d\d\s\d\d\:\d\d\:\d\d\s\[)'
+  multiline.negate: true
+  multiline.match: after
+  multiline.max_lines: 100000
+  fields:
+    infra:
+      attack_scenario: {{ redelk_attack_scenario }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: beacon
+
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  fields_under_root: true
+  paths:
+    - /root/cobaltstrike/server/logs/*/*/keystrokes/keystrokes_*.txt
+  multiline.pattern: '(^\d\d\/\d\d\s\d\d\:\d\d\:\d\d\sUTC\s\[)|(^\d\d\/\d\d\s\d\d\:\d\d\:\d\d\s\[)'
+  multiline.negate: true
+  multiline.match: after
+  multiline.max_lines: 100000
+  fields:
+    infra:
+      attack_scenario: {{ redelk_attack_scenario }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: keystrokes
+
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  fields_under_root: true
+  paths:
+    - /root/cobaltstrike/server/logs/*/*/screenshots.log
+  multiline.pattern: '(^\d\d\/\d\d\s\d\d\:\d\d\:\d\d\sUTC\s\[)|(^\d\d\/\d\d\s\d\d\:\d\d\:\d\d\s\[)'
+  multiline.negate: true
+  multiline.match: after
+  multiline.max_lines: 100000
+  fields:
+    infra:
+      attack_scenario: {{ redelk_attack_scenario }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: screenshots

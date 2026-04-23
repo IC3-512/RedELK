@@ -23,19 +23,10 @@
     - name: Delayed gathering of facts
       ansible.builtin.setup:
 
-    - name: Optionally generate RedELK packages on control node
-      ansible.builtin.command:
-        cmd: "./initial-setup.sh {{ redelk_openssl_config_path }}"
-      args:
-        chdir: "{{ redelk_local_repo_path }}"
-      delegate_to: localhost
-      run_once: true
-      when: redelk_generate_packages | bool
-      changed_when: true
-
   roles:
-    - name: ssh
-      tags: ssh
+    - name: ansible-role-redelk-package-prep
+      when: redelk_generate_packages | bool
+      tags: pre
 
 - hosts: elkservers
   roles:
@@ -48,8 +39,6 @@
   roles:
     - name: docker
       tags: c2server
-    - name: c2server
-      tags: c2server
     - name: ansible-role-redelk-client
       when: deploy_redelk == true
       tags: redelk-client
@@ -61,4 +50,3 @@
     - name: ansible-role-redelk-client
       when: deploy_redelk == true
       tags: redelk-client
-

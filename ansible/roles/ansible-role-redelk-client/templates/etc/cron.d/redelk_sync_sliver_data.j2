@@ -1,0 +1,6 @@
+{{ ansible_managed | comment }}
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+* * * * * root /usr/bin/rsync -rvx --append-verify --delete /root/.sliver/logs/audit.json {{ redelk_sync_user_home }}/sliver/; /bin/chown -R {{ redelk_sync_user }}:{{ redelk_sync_user }} {{ redelk_sync_user_home }}/sliver/*

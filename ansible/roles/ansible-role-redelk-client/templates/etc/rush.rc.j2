@@ -1,0 +1,12 @@
+{{ ansible_managed | comment }}
+
+debug 1
+rule rsync
+  command ^rsync --server --sender
+  uid >= 1000
+  set[0] /usr/bin/rsync
+  match[$] ^~/.*
+  match[$] ! \.\.
+  transform[$] s,^~/,./,
+  umask 002
+  chdir ~

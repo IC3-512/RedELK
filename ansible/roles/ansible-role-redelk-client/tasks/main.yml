@@ -1,59 +1,73 @@
 ---
-- name: Ensure required connector variables are set
-  ansible.builtin.assert:
-    that:
-      - redelk_attack_scenario is defined
-      - redelk_logstash_endpoint is defined
-    fail_msg: "Set redelk_attack_scenario and redelk_logstash_endpoint in inventory.yml."
+# RedELK clients install (C2 and redirectors) tasks
+- name: Install dependency packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - python3-pip
+    state: present
+    update_cache: true
+  tags:
+    - packages
 
-- name: Set connector package for c2servers
-  ansible.builtin.set_fact:
-    redelk_client_package: c2servers.tgz
-    redelk_client_subdir: c2servers
-    redelk_client_installer: ./install-c2server.sh
+- name: Install Elastic repository
+  become: true
+  tags:
+    - packages
+  block:
+    - name: Add Elastic GPG key
+      ansible.builtin.apt_key:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+
+    - name: Add Elastic APT repository
+      ansible.builtin.apt_repository:
+        repo: deb https://artifacts.elastic.co/packages/7.x/apt stable main
+        state: present
+        filename: elastic-7.x
+
+- name: Install Filebeat package
+  become: true
+  ansible.builtin.apt:
+    name:
+      - "{{ redelk_filebeat_package }}"
+    state: present
+    update_cache: true
+  tags:
+    - packages
+
+- name: Install C2-side package requirements
+  become: true
+  ansible.builtin.apt:
+    name:
+      - rsync
+      - rush
+    state: present
+    update_cache: true
   when: "'c2servers' in group_names"
+  tags:
+    - packages
 
-- name: Set connector package for redirs
-  ansible.builtin.set_fact:
-    redelk_client_package: redirs.tgz
-    redelk_client_subdir: redirs
-    redelk_client_installer: ./install-redir.sh
-  when: "'redirs' in group_names"
+- name: Install C2-side Python requirements
+  become: true
+  ansible.builtin.pip:
+    name:
+      - javaobj-py3
+    break_system_packages: "{{ ansible_facts['distribution_version'] is version('24.04', '>=') }}"
+  when: "'c2servers' in group_names"
+  tags:
+    - packages
 
-- name: Ensure client target host type is supported
-  ansible.builtin.assert:
-    that:
-      - redelk_client_package is defined
-      - redelk_client_subdir is defined
-      - redelk_client_installer is defined
-    fail_msg: "ansible-role-redelk-client only supports hosts in 'c2servers' or 'redirs'."
+- name: Setup filebeat-side connector package
+  ansible.builtin.import_tasks: filebeat.yml
+  tags:
+    - filebeat
+    - beats
 
-- name: Ensure deployment directory exists
-  ansible.builtin.file:
-    path: "{{ redelk_remote_base_path }}"
-    state: directory
-    mode: "0755"
-
-- name: Upload and extract connector package
-  ansible.builtin.unarchive:
-    src: "{{ redelk_local_repo_path }}/{{ redelk_client_package }}"
-    dest: "{{ redelk_remote_base_path }}"
-    mode: "0755"
-
-- name: Run connector installer
-  ansible.builtin.command:
-    argv:
-      - "{{ redelk_client_installer }}"
-      - "{{ redelk_identifier | default(inventory_hostname) }}"
-      - "{{ redelk_attack_scenario }}"
-      - "{{ redelk_logstash_endpoint }}"
-  args:
-    chdir: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}"
-    creates: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}/.ansible_redelk_installed"
-
-- name: Create idempotency marker
-  ansible.builtin.copy:
-    content: ""
-    dest: "{{ redelk_remote_base_path }}/{{ redelk_client_subdir }}/.ansible_redelk_installed"
-    mode: "0600"
-    force: false
+- name: Setup C2-side connector extras
+  ansible.builtin.import_tasks: c2.yml
+  tags:
+    - c2
+  when: "'c2servers' in group_names"

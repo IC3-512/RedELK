@@ -1,0 +1,12 @@
+---
+- name: Restart RedELK docker containers
+  become: true
+  ansible.builtin.shell: |
+    if command -v docker-compose >/dev/null 2>&1; then
+      docker-compose -f docker-compose.yml up --build -d
+    else
+      docker compose -f docker-compose.yml up --build -d
+    fi
+  args:
+    chdir: "{{ redelk_remote_base_path }}/elkserver"
+  changed_when: true

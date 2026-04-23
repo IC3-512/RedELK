@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# Part of RedELK
+# Copy downloaded files from the Stage1 teamserver to the RedELK sync user.
+#
+
+LOGFILE="{{ redelk_log_dir }}/copydownloads.log"
+
+mkdir -p "{{ redelk_sync_user_home }}/stage1/downloads" >> "$LOGFILE" 2>&1
+
+echo "$(date) # Start Stage1 downloads copy" >> "$LOGFILE" 2>&1
+
+for fileid in $(ls /root/stage1c2server/shared/downloads/ | grep -v '\.'); do
+  orifilename=$(grep -rn "$fileid" /root/stage1c2server/shared/logs/api/implant_logs/legacy_text/* | awk 'BEGIN {FS="taskResponse: Downloaded"}; {print $2}' | awk -F"] " '{print $2}' | tr -d ";" | awk '{$1=$1};1')
+  if [ -z "$orifilename" ]; then
+    orifilename="filenameunknown"
+  fi
+  if [ ! -f "{{ redelk_sync_user_home }}/stage1/downloads/${fileid}_${orifilename}" ]; then
+    cp "/root/stage1c2server/shared/downloads/${fileid}" "{{ redelk_sync_user_home }}/stage1/downloads/${fileid}_${orifilename}"
+    chown {{ redelk_sync_user }}:{{ redelk_sync_user }} "{{ redelk_sync_user_home }}/stage1/downloads/${fileid}_${orifilename}"
+  fi
+done
+
+echo "$(date) # Done Stage1" >> "$LOGFILE" 2>&1

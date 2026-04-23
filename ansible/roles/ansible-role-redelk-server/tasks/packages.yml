@@ -1,0 +1,14 @@
+---
+- name: Install ELK server prerequisite packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - apache2-utils
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - jq
+      - openssl
+      - python3
+    state: present
+    update_cache: true
