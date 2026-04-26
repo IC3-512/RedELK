@@ -6,9 +6,9 @@ This is the infrastructure-as-code path for RedELK.
 The original shell scripts remain available in the repository for customers who prefer manual installs without Ansible.
 
 It is intentionally small and focused on:
-- RedELK server deployment (`ansible-role-redelk-server`)
-- RedELK client connector deployment (`ansible-role-redelk-client`)
-- Docker installation on ELK hosts (`docker` role)
+- RedELK server deployment (`redelk-server`)
+- RedELK client connector deployment (`redelk-client`)
+- Docker installation on hosts that need a local Docker engine (`docker` role)
 
 ## Scope
 
@@ -42,19 +42,30 @@ This Ansible example does not remove that path. Instead it provides an IaC workf
 - `inventory.yml`: example inventory
 - `inventory-live.example.yml`: example inventory for real test hosts
 - `group_vars/`: example variable sets
-- `roles/ansible-role-redelk-package-prep`: local package preparation role for certs, SSH keys, and archives
+- `roles/redelk-package-prep`: local package preparation role for certs, SSH keys, and archives
 - `roles/docker`: local Docker install role
-- `roles/ansible-role-redelk-server`: native ELK server role with internal-style task split
-- `roles/ansible-role-redelk-client`: native client role for Filebeat, redirector logs, and public C2 sync helpers
+- `roles/redelk-server`: native ELK server role with internal-style task split
+- `roles/redelk-client`: native client role for Filebeat, redirector logs, and public C2 sync helpers
+
+Each of those RedELK roles also has its own local `README.md` with role-specific
+design notes and implementation details.
 
 ## Prerequisites
 
 - Ansible available on the control node
+- required collections installed from `collections.yml`
 - SSH access to all targets
 - privilege escalation (`become`) on targets
 - Debian/APT-based targets for RedELK installer compatibility
 - Ubuntu targets for the local `docker` role
 - valid certificate config at `certs/config.cnf` if package generation is enabled
+
+Install the shared Ansible collections first:
+
+```bash
+cd ansible
+ansible-galaxy collection install -r collections.yml -p .ansible/collections
+```
 
 ## Required Variables
 
@@ -122,23 +133,24 @@ ansible-playbook -i inventory-live.yml playbook.yml
 Notes for live runs:
 - `playbook.yml` is the integrale deployment playbook for RedELK plus the client connectors
 - `molecule/redelk` is useful for local role validation, not as the primary entrypoint for real systems
-- `ansible-role-redelk-package-prep` replaces the old `initial-setup.sh` flow only for the Ansible path
-- `ansible-role-redelk-server` deploys the public ELK package natively for the Ansible path; the standalone script path still exists separately
-- `ansible-role-redelk-client` is native Ansible for the Ansible path; the standalone client scripts still exist separately
+- `redelk-package-prep` replaces the old `initial-setup.sh` flow only for the Ansible path
+- `redelk-server` deploys the public ELK package natively for the Ansible path; the standalone script path still exists separately
+- `redelk-client` is native Ansible for the Ansible path; the standalone client scripts still exist separately
+- Docker installation is intentionally kept in the separate `docker` role for the Ansible path, even though the legacy ELK installer script bootstraps Docker itself
 
 ## Molecule Testing
 
 A Molecule split setup is available:
 - `molecule/docker`: isolated test of the `docker` role
-- `molecule/redelk`: test of RedELK server/client roles with fixture installers
+- `molecule/redelk`: test of `redelk-server` and `redelk-client` with fixture archives generated from the repository contents
 
-Both scenarios use privileged Ubuntu containers (Docker-in-Docker capable).
+Both scenarios use privileged Ubuntu containers.
 
 Run Docker-role tests:
 
 ```bash
 cd ansible
-ansible-galaxy collection install -r molecule/docker/collections.yml -p .ansible/collections
+ansible-galaxy collection install -r collections.yml -p .ansible/collections
 molecule test -s docker
 ```
 
@@ -146,32 +158,37 @@ Run RedELK-role tests:
 
 ```bash
 cd ansible
-ansible-galaxy collection install -r molecule/redelk/collections.yml -p .ansible/collections
+ansible-galaxy collection install -r collections.yml -p .ansible/collections
 molecule test -s redelk
 ```
 
 Requirements:
 - local Docker daemon running
 - ability to run privileged containers
+- outbound network access for apt repositories used during Molecule prepare/converge
 
 ## Playbook Behavior
 
 `playbook.yml` runs these plays:
 - `all`: SSH prep, optional package generation, and shared pre-tasks
-- `elkservers`: `docker` then `ansible-role-redelk-server`
-- `c2servers`: `docker` and optional `ansible-role-redelk-client`
-- `redirs`: `redir` and optional `ansible-role-redelk-client`
+- `elkservers`: `docker` then `redelk-server`
+- `c2servers`: `docker` and optional `redelk-client`
+- `redirs`: `redir` and optional `redelk-client`
+
+This Docker split is deliberate:
+- the public Ansible path follows the same role boundary as `infra_mgmnt`
+- the legacy shell scripts remain authoritative for standalone installs, but not for Ansible role decomposition
 
 ## Idempotency and Re-runs
 
-The ELK server role preserves generated package contents and first-run config files with marker files:
-- `/opt/redelk/.ansible_redelk_package_extracted`
-- `/opt/redelk/elkserver/.ansible_redelk_installed`
+The ELK server role preserves generated package contents by checking for extracted package content at:
+- `/opt/redelk/elkserver/VERSION`
 
-Remove the package marker if you want to force re-extraction of `elkserver.tgz`.
+Set `redelk_force_extract_server_package: true` if you want to force re-extraction of `elkserver.tgz`.
 
 ## Notes
 
 - This is a minimal public example, not a full production framework.
 - Supporting infra roles outside the RedELK scripts, such as `redir`, remain environment-specific and may need adaptation for your setup.
 - If you do not want to use Ansible, use the script-based deployment path documented in the repository root [`README.md`](../README.md).
+- The current static parity assessment between the legacy scripts and the Ansible path is documented in [`test-results/legacy-vs-ansible-static-parity.md`](./test-results/legacy-vs-ansible-static-parity.md).

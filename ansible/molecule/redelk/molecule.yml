@@ -62,12 +62,12 @@ provisioner:
   name: ansible
   env:
     ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/roles
-    ANSIBLE_COLLECTIONS_PATH: ${MOLECULE_PROJECT_DIRECTORY}/.ansible/collections
-    ANSIBLE_COLLECTIONS_SCAN_SYS_PATH: "true"
+    ANSIBLE_COLLECTIONS_PATH: ${MOLECULE_PROJECT_DIRECTORY}/.ansible/collections:${HOME}/.ansible/collections
   config_options:
     defaults:
       host_key_checking: false
       become: false
+      remote_tmp: /tmp/.ansible/tmp
   inventory:
     group_vars:
       all:
@@ -79,6 +79,7 @@ provisioner:
         ansible_become: true
         ansible_python_interpreter: /usr/bin/python3
         redelk_elk_install_command: ./install-elkserver.sh limited
+        redelk_start_containers: false
       c2servers:
         ansible_user: root
         ansible_become: true
@@ -94,6 +95,7 @@ provisioner:
         redelk_attack_scenario: molecule-test
         redelk_logstash_endpoint: redelk.local:5044
   playbooks:
+    create: create.yml
     cleanup: cleanup.yml
     prepare: prepare.yml
     converge: converge.yml

@@ -1,0 +1,603 @@
+---
+- name: Ensure local ELK server package exists
+  delegate_to: localhost
+  ansible.builtin.stat:
+    path: "{{ redelk_local_repo_path }}/elkserver.tgz"
+  register: redelk_server_local_package
+
+- name: Fail when ELK server package is missing
+  ansible.builtin.fail:
+    msg: >-
+      Missing package {{ redelk_local_repo_path }}/elkserver.tgz.
+      Generate it with the package prep role or provide a prebuilt archive.
+  when:
+    - redelk_extract_server_package | bool
+    - not redelk_server_local_package.stat.exists
+
+- name: Validate Let's Encrypt settings
+  ansible.builtin.assert:
+    that:
+      - redelk_external_domain | trim | length > 0
+    fail_msg: >-
+      Set redelk_external_domain when redelk_letsencrypt_enabled is true.
+  when: redelk_letsencrypt_enabled | bool
+
+- name: Set RedELK server deployment facts
+  ansible.builtin.set_fact:
+    redelk_server_path: "{{ redelk_remote_base_path }}/elkserver"
+    redelk_server_compose_file: "redelk-{{ redelk_server_install_type }}.yml"
+    redelk_server_env_external_domain: >-
+      {{ redelk_external_domain if redelk_letsencrypt_enabled else redelk_self_signed_cert_dirname }}
+    redelk_server_env_le_email: >-
+      {{ redelk_letsencrypt_email if redelk_letsencrypt_enabled else redelk_self_signed_cert_dirname }}
+    redelk_server_bloodhound_enabled: "{{ redelk_server_install_type != 'limited' }}"
+
+- name: Ensure deployment directory exists
+  ansible.builtin.file:
+    path: "{{ redelk_remote_base_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Check if ELK server package content already exists
+  ansible.builtin.stat:
+    path: "{{ redelk_remote_base_path }}/elkserver/VERSION"
+  register: redelk_server_extract_marker
+
+- name: Upload and extract ELK server package
+  ansible.builtin.unarchive:
+    src: "{{ redelk_local_repo_path }}/elkserver.tgz"
+    dest: "{{ redelk_remote_base_path }}"
+    mode: "0755"
+  when:
+    - redelk_extract_server_package | bool
+    - redelk_force_extract_server_package | bool or not redelk_server_extract_marker.stat.exists
+
+- name: Read packaged VERSION file
+  ansible.builtin.slurp:
+    src: "{{ redelk_server_path }}/VERSION"
+  register: redelk_server_version_file
+
+- name: Set RedELK version fact
+  ansible.builtin.set_fact:
+    redelk_server_version: "{{ redelk_server_version_file.content | b64decode | trim }}"
+
+- name: Check for existing .env file
+  ansible.builtin.stat:
+    path: "{{ redelk_server_path }}/.env"
+  register: redelk_server_env_stat
+
+- name: Read existing .env file
+  ansible.builtin.slurp:
+    src: "{{ redelk_server_path }}/.env"
+  register: redelk_server_env_existing
+  when: redelk_server_env_stat.stat.exists
+
+- name: Check for existing BloodHound config
+  ansible.builtin.stat:
+    path: "{{ redelk_server_path }}/mounts/bloodhound-config/bloodhound.config.json"
+  register: redelk_server_bloodhound_config_stat
+  when: redelk_server_bloodhound_enabled | bool
+
+- name: Read existing BloodHound config
+  ansible.builtin.slurp:
+    src: "{{ redelk_server_path }}/mounts/bloodhound-config/bloodhound.config.json"
+  register: redelk_server_bloodhound_config_existing
+  when:
+    - redelk_server_bloodhound_enabled | bool
+    - redelk_server_bloodhound_config_stat.stat.exists
+
+- name: Set RedELK secret facts
+  ansible.builtin.set_fact:
+    redelk_server_existing_env_content: "{{ (redelk_server_env_existing.content | b64decode) if redelk_server_env_stat.stat.exists else '' }}"
+    redelk_server_existing_bloodhound_config_content: >-
+      {{ (redelk_server_bloodhound_config_existing.content | b64decode)
+         if (redelk_server_bloodhound_enabled | bool and redelk_server_bloodhound_config_stat.stat.exists)
+         else '' }}
+
+- name: Resolve RedELK secret values
+  ansible.builtin.set_fact:
+    redelk_server_kibana_system_password: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^CREDS_kibana_system=(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_logstash_system_password: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^CREDS_logstash_system=(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_redelk_ingest_password: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^CREDS_redelk_ingest=(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_redelk_password: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^CREDS_redelk=(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_elastic_password: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^ELASTIC_PASSWORD=(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_kibana_encryption_key: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^KBN_XPACK_ENCRYPTEDSAVEDOBJECTS=(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_neo4j_password: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^NEO4J_AUTH=neo4j/(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_postgres_password: >-
+      {{ (redelk_server_existing_env_content | regex_findall('(?m)^POSTGRES_PASSWORD=(.+)$') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_bloodhound_password: >-
+      {{ (redelk_server_existing_bloodhound_config_content | regex_findall('"password":\s*"([^"]+)"') | first)
+         | default(lookup('password', '/dev/null length=32 chars=ascii_letters,digits'), true) }}
+    redelk_server_bloodhound_admin_email: >-
+      {{ (redelk_server_existing_bloodhound_config_content | regex_findall('"email_address":\s*"([^"]+)"') | first)
+         | default(redelk_letsencrypt_email | default('redelk@example.com', true), true) }}
+
+- name: Ensure RedELK runtime directories exist
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: "mounts/certbot/conf/live", owner: "1000", group: "1000" }
+    - { path: "mounts/jupyter-workbooks", owner: "1000", group: "1000" }
+    - { path: "mounts/redelk-logs", owner: "1000", group: "1000" }
+    - { path: "mounts/redelk-www", owner: "1000", group: "1000" }
+    - { path: "mounts/logstash-config", owner: "1000", group: "1000" }
+    - { path: "mounts/elasticsearch-config/jvm.options.d", owner: "1000", group: "1000" }
+
+- name: Check whether RedELK base cron file exists
+  ansible.builtin.stat:
+    path: "{{ redelk_server_path }}/mounts/redelk-config/etc/cron.d/redelk"
+  register: redelk_server_base_cron
+
+- name: Check for packaged initial setup certificate config
+  ansible.builtin.stat:
+    path: "{{ redelk_server_path }}/initial-setup-data/certs/config.cnf"
+  register: redelk_server_initial_setup_cert_config
+  when: not redelk_letsencrypt_enabled | bool
+
+- name: Read packaged initial setup certificate config
+  ansible.builtin.slurp:
+    src: "{{ redelk_server_path }}/initial-setup-data/certs/config.cnf"
+  register: redelk_server_initial_setup_cert_config_content
+  when:
+    - not redelk_letsencrypt_enabled | bool
+    - redelk_server_initial_setup_cert_config.stat.exists
+
+- name: Resolve self-signed certificate subject from packaged config
+  ansible.builtin.set_fact:
+    redelk_server_self_signed_cert_subject: >-
+      {{
+        (
+          (
+            redelk_server_initial_setup_cert_config_content.content | b64decode
+            if redelk_server_initial_setup_cert_config.stat.exists
+            else ''
+          )
+          | regex_findall('(?m)^(?:DNS|IP)\\.\\d+\\s*=\\s*(.+)$')
+          | map('trim')
+          | first
+        )
+        | default(redelk_external_domain | default(redelk_self_signed_cert_dirname, true), true)
+      }}
+  when: not redelk_letsencrypt_enabled | bool
+
+- name: Render Docker environment file
+  become: true
+  ansible.builtin.template:
+    src: docker-env.j2
+    dest: "{{ redelk_server_path }}/.env"
+    mode: "0640"
+
+- name: Render RedELK config file
+  become: true
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ redelk_server_path }}/mounts/redelk-config/etc/redelk/config.json"
+    mode: "0644"
+
+- name: Render BloodHound config
+  become: true
+  ansible.builtin.template:
+    src: bloodhound.config.json.j2
+    dest: "{{ redelk_server_path }}/mounts/bloodhound-config/bloodhound.config.json"
+    mode: "0644"
+  when: redelk_server_bloodhound_enabled | bool
+
+- name: Render RedELK password reference file
+  become: true
+  ansible.builtin.template:
+    src: redelk_passwords.cfg.j2
+    dest: "{{ redelk_server_path }}/redelk_passwords.cfg"
+    mode: "0600"
+
+- name: Render password reference file for Jupyter notebooks
+  become: true
+  ansible.builtin.template:
+    src: redelk_passwords.cfg.j2
+    dest: "{{ redelk_server_path }}/mounts/jupyter-workbooks/redelk_passwords.py"
+    mode: "0600"
+
+- name: Set permissions on RedELK base cron file
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/redelk-config/etc/cron.d/redelk"
+    owner: root
+    group: root
+    mode: "0600"
+  when: redelk_server_base_cron.stat.exists
+
+- name: Create htpasswd file for RedELK web access
+  become: true
+  community.general.htpasswd:
+    path: "{{ redelk_server_path }}/mounts/nginx-config/htpasswd.users.template"
+    name: "{{ redelk_redelk_username }}"
+    password: "{{ redelk_server_redelk_password }}"
+    create: true
+    mode: "0640"
+
+- name: Set Elasticsearch JVM heap minimum
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ redelk_server_path }}/mounts/elasticsearch-config/jvm.options.d/jvm.options"
+    regexp: '^-Xms.*$'
+    line: "-Xms{{ redelk_server_es_memory }}"
+
+- name: Set Elasticsearch JVM heap maximum
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ redelk_server_path }}/mounts/elasticsearch-config/jvm.options.d/jvm.options"
+    regexp: '^-Xmx.*$'
+    line: "-Xmx{{ redelk_server_es_memory }}"
+
+- name: Ensure recursive ownership on Logstash config
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/logstash-config"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+
+- name: Ensure recursive ownership on RedELK logs
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/redelk-logs"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+
+- name: Ensure recursive ownership on RedELK www data
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/redelk-www"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+
+- name: Ensure recursive ownership on Jupyter workbooks
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/jupyter-workbooks"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+
+- name: Ensure recursive ownership on Elasticsearch config
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/elasticsearch-config"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+
+- name: Find RedELK log files for mode normalization
+  become: true
+  ansible.builtin.find:
+    paths: "{{ redelk_server_path }}/mounts/redelk-logs"
+    file_type: file
+  register: redelk_server_log_files
+
+- name: Set permissions on RedELK log files
+  become: true
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "0664"
+  loop: "{{ redelk_server_log_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Find RedELK www files for mode normalization
+  become: true
+  ansible.builtin.find:
+    paths: "{{ redelk_server_path }}/mounts/redelk-www"
+    file_type: any
+    recurse: false
+  register: redelk_server_www_entries
+
+- name: Set permissions on RedELK www top-level entries
+  become: true
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "0755"
+  loop: "{{ redelk_server_www_entries.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Disable full-only nginx locations for limited install
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ redelk_server_path }}/mounts/nginx-config/default.conf.template"
+    regexp: '^\s*include conf\.d/full\.location-conf;\s*$'
+    line: '    # include conf.d/full.location-conf;'
+  when: not (redelk_server_bloodhound_enabled | bool)
+
+- name: Disable full-only nginx BloodHound location for limited install
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ redelk_server_path }}/mounts/nginx-config/default.conf.template"
+    regexp: '^\s*include conf\.d/full\.bloodhound-conf;\s*$'
+    line: '# include conf.d/full.bloodhound-conf;'
+  when: not (redelk_server_bloodhound_enabled | bool)
+
+- name: Enable full nginx locations for full-style install
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ redelk_server_path }}/mounts/nginx-config/default.conf.template"
+    regexp: '^\s*#\s*include conf\.d/full\.location-conf;\s*$'
+    line: '    include conf.d/full.location-conf;'
+  when: redelk_server_bloodhound_enabled | bool
+
+- name: Enable full nginx BloodHound location for full-style install
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ redelk_server_path }}/mounts/nginx-config/default.conf.template"
+    regexp: '^\s*#\s*include conf\.d/full\.bloodhound-conf;\s*$'
+    line: 'include conf.d/full.bloodhound-conf;'
+  when: redelk_server_bloodhound_enabled | bool
+
+- name: Link docker-compose.yml to selected RedELK stack file
+  become: true
+  ansible.builtin.file:
+    src: "{{ redelk_server_compose_file }}"
+    dest: "{{ redelk_server_path }}/docker-compose.yml"
+    state: link
+    force: true
+
+- name: Persist vm.max_map_count for Elasticsearch
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-redelk.conf
+    content: "vm.max_map_count={{ redelk_vm_max_map_count }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  register: redelk_vm_max_map_count_config
+  when: not redelk_dryrun | bool
+
+- name: Apply sysctl settings when vm.max_map_count config changed
+  become: true
+  ansible.builtin.command: sysctl --system
+  when:
+    - not redelk_dryrun | bool
+    - redelk_vm_max_map_count_config.changed
+  changed_when: true
+
+- name: Check for existing self-signed certificate
+  ansible.builtin.stat:
+    path: >-
+      {{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_self_signed_cert_dirname }}/fullchain.pem
+  register: redelk_server_self_signed_cert
+  when: not redelk_letsencrypt_enabled | bool
+
+- name: Ensure self-signed certificate directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_self_signed_cert_dirname }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+  when: not redelk_letsencrypt_enabled | bool
+
+- name: Create self-signed certificate for nginx
+  become: true
+  community.crypto.openssl_privatekey:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_self_signed_cert_dirname }}/privkey.pem"
+    type: RSA
+    size: 4096
+    mode: "0600"
+  when: not redelk_letsencrypt_enabled | bool
+
+- name: Build self-signed certificate request content for nginx
+  become: true
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_self_signed_cert_dirname }}/privkey.pem"
+    common_name: "{{ redelk_server_self_signed_cert_subject }}"
+    use_common_name_for_san: false
+  register: redelk_server_self_signed_cert_csr
+  when:
+    - not redelk_letsencrypt_enabled | bool
+    - not redelk_server_self_signed_cert.stat.exists
+
+- name: Create self-signed certificate for nginx
+  become: true
+  community.crypto.x509_certificate:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_self_signed_cert_dirname }}/fullchain.pem"
+    privatekey_path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_self_signed_cert_dirname }}/privkey.pem"
+    csr_content: "{{ redelk_server_self_signed_cert_csr.csr }}"
+    provider: selfsigned
+    selfsigned_create_subject_key_identifier: always_create
+    selfsigned_digest: sha256
+    selfsigned_not_after: +365d
+    mode: "0644"
+  when:
+    - not redelk_letsencrypt_enabled | bool
+    - not redelk_server_self_signed_cert.stat.exists
+
+- name: Ensure self-signed certificate ownership matches legacy installer
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_self_signed_cert_dirname }}"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+  when: not redelk_letsencrypt_enabled | bool
+
+- name: Check for existing Let's Encrypt certificate
+  ansible.builtin.stat:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_external_domain }}/fullchain.pem"
+  register: redelk_server_letsencrypt_cert
+  when: redelk_letsencrypt_enabled | bool
+
+- name: Build Let's Encrypt email arguments
+  ansible.builtin.set_fact:
+    redelk_server_letsencrypt_email_argv: >-
+      {{
+        ['--register-unsafely-without-email']
+        if redelk_letsencrypt_email | trim | length == 0
+        else ['--email', redelk_letsencrypt_email]
+      }}
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Build Let's Encrypt staging arguments
+  ansible.builtin.set_fact:
+    redelk_server_letsencrypt_staging_argv: >-
+      {{ ['--staging'] if redelk_letsencrypt_staging | string != '0' else [] }}
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Build Let's Encrypt certbot command arguments
+  ansible.builtin.set_fact:
+    redelk_server_letsencrypt_certbot_argv: >-
+      {{
+        ['certonly', '--webroot', '-w', '/var/www/certbot']
+        + redelk_server_letsencrypt_staging_argv
+        + redelk_server_letsencrypt_email_argv
+        + ['-d', redelk_external_domain, '--rsa-key-size', '4096', '--agree-tos', '--force-renewal', '-n']
+      }}
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Ensure Let's Encrypt live directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_external_domain }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Create dummy private key for Let's Encrypt bootstrap
+  become: true
+  community.crypto.openssl_privatekey:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_external_domain }}/privkey.pem"
+    type: RSA
+    size: 4096
+    mode: "0600"
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Create dummy certificate for Let's Encrypt bootstrap
+  become: true
+  community.crypto.x509_certificate:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_external_domain }}/fullchain.pem"
+    privatekey_path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_external_domain }}/privkey.pem"
+    provider: selfsigned
+    selfsigned_digest: sha256
+    selfsigned_not_after: +365d
+    mode: "0644"
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Start nginx for Let's Encrypt webroot validation
+  become: true
+  community.docker.docker_compose_v2:
+    project_src: "{{ redelk_server_path }}"
+    project_name: "{{ redelk_compose_project_name }}"
+    files:
+      - docker-compose.yml
+    services:
+      - nginx
+    dependencies: false
+    state: present
+    wait: true
+    wait_timeout: 120
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Remove dummy Let's Encrypt certificate directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_external_domain }}"
+    state: absent
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_dryrun | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Request Let's Encrypt certificate with certbot
+  become: true
+  community.docker.docker_compose_v2_run:
+    project_src: "{{ redelk_server_path }}"
+    project_name: "{{ redelk_compose_project_name }}"
+    files:
+      - docker-compose.yml
+    service: certbot
+    argv: "{{ redelk_server_letsencrypt_certbot_argv }}"
+    cleanup: true
+    no_deps: true
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Restart nginx after Let's Encrypt bootstrap
+  become: true
+  community.docker.docker_compose_v2:
+    project_src: "{{ redelk_server_path }}"
+    project_name: "{{ redelk_compose_project_name }}"
+    files:
+      - docker-compose.yml
+    services:
+      - nginx
+    dependencies: false
+    state: restarted
+  when:
+    - redelk_letsencrypt_enabled | bool
+    - not redelk_server_letsencrypt_cert.stat.exists
+
+- name: Ensure Let's Encrypt certificate ownership matches legacy installer
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_server_path }}/mounts/certbot/conf/live/{{ redelk_external_domain }}"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+  when: redelk_letsencrypt_enabled | bool
+
+- name: Start or update RedELK stack
+  become: true
+  community.docker.docker_compose_v2:
+    project_src: "{{ redelk_server_path }}"
+    project_name: "{{ redelk_compose_project_name }}"
+    files:
+      - docker-compose.yml
+    build: always
+    state: present
+  when:
+    - redelk_start_containers | bool
+    - not redelk_dryrun | bool

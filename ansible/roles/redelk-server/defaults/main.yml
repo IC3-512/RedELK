@@ -3,6 +3,8 @@ redelk_local_repo_path: "{{ playbook_dir | dirname }}"
 redelk_remote_base_path: /opt/redelk
 redelk_elk_install_command: "./install-elkserver.sh limited"
 redelk_install_type: ""
+redelk_fixedmemory: false
+redelk_dryrun: false
 redelk_extract_server_package: true
 redelk_force_extract_server_package: false
 redelk_compose_project_name: redelk

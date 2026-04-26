@@ -3,16 +3,16 @@
   hosts: elkservers
   gather_facts: true
   roles:
-    - ansible-role-redelk-server
+    - redelk-server
 
 - name: Converge C2 servers
   hosts: c2servers
   gather_facts: true
   roles:
-    - ansible-role-redelk-client
+    - redelk-client
 
 - name: Converge redirectors
   hosts: redirs
   gather_facts: true
   roles:
-    - ansible-role-redelk-client
+    - redelk-client

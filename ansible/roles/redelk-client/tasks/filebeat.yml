@@ -20,7 +20,7 @@
   ansible.builtin.assert:
     that:
       - redelk_ca_source_path is defined
-    fail_msg: "ansible-role-redelk-client only supports hosts in 'c2servers' or 'redirs'."
+    fail_msg: "redelk-client only supports hosts in 'c2servers' or 'redirs'."
 
 - name: Check that RedELK CA certificate exists on control node
   ansible.builtin.stat:
@@ -45,6 +45,31 @@
     owner: root
     group: root
     mode: "0750"
+
+- name: Check for existing Filebeat main configuration
+  become: true
+  ansible.builtin.stat:
+    path: "{{ redelk_filebeat_main_config }}"
+  register: redelk_filebeat_main_config_stat
+
+- name: Check for existing legacy-style Filebeat backup
+  become: true
+  ansible.builtin.stat:
+    path: "{{ redelk_filebeat_main_config }}.ori"
+  register: redelk_filebeat_main_config_backup_stat
+
+- name: Preserve legacy-style Filebeat backup
+  become: true
+  ansible.builtin.copy:
+    src: "{{ redelk_filebeat_main_config }}"
+    dest: "{{ redelk_filebeat_main_config }}.ori"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - redelk_filebeat_main_config_stat.stat.exists
+    - not redelk_filebeat_main_config_backup_stat.stat.exists
 
 - name: Deploy Filebeat main configuration
   become: true
@@ -100,6 +125,8 @@
     mode: "0644"
   when: "'redirs' in group_names"
   notify: Restart filebeat
+  tags:
+    - never
 
 - name: Remove C2 Filebeat input configurations from redirectors
   become: true
@@ -111,6 +138,13 @@
     - outflankstage1
     - poshc2
     - sliver
+  when: "'redirs' in group_names"
+
+- name: Remove redirector Filebeat input configuration from redirectors
+  become: true
+  ansible.builtin.file:
+    path: "{{ redelk_filebeat_redir_input_file }}"
+    state: absent
   when: "'redirs' in group_names"
 
 - name: Deploy RedELK CA certificate
@@ -129,3 +163,23 @@
     name: filebeat
     enabled: true
     state: started
+
+- name: Check whether HAProxy logrotate config exists on redirectors
+  become: true
+  ansible.builtin.stat:
+    path: "{{ redelk_redir_haproxy_logrotate_path }}"
+  register: redelk_redir_haproxy_logrotate
+  when:
+    - "'redirs' in group_names"
+    - redelk_redir_manage_haproxy_logrotate | bool
+
+- name: Adjust HAProxy logrotate schedule to weekly on redirectors
+  become: true
+  ansible.builtin.replace:
+    path: "{{ redelk_redir_haproxy_logrotate_path }}"
+    regexp: '(?m)^(\\s*)daily(\\s*)$'
+    replace: '\\1weekly\\2'
+  when:
+    - "'redirs' in group_names"
+    - redelk_redir_manage_haproxy_logrotate | bool
+    - redelk_redir_haproxy_logrotate.stat.exists

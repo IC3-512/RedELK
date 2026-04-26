@@ -24,7 +24,7 @@
       ansible.builtin.setup:
 
   roles:
-    - name: ansible-role-redelk-package-prep
+    - name: redelk-package-prep
       when: redelk_generate_packages | bool
       tags: pre
 
@@ -32,14 +32,12 @@
   roles:
     - name: docker
       tags: redelk-server
-    - name: ansible-role-redelk-server
+    - name: redelk-server
       tags: redelk-server
 
 - hosts: c2servers
   roles:
-    - name: docker
-      tags: c2server
-    - name: ansible-role-redelk-client
+    - name: redelk-client
       when: deploy_redelk == true
       tags: redelk-client
 
@@ -47,6 +45,6 @@
   roles:
     - name: redir
       tags: redir
-    - name: ansible-role-redelk-client
+    - name: redelk-client
       when: deploy_redelk == true
       tags: redelk-client

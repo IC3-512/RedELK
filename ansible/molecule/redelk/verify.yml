@@ -3,40 +3,64 @@
   hosts: elkservers
   gather_facts: false
   tasks:
-    - name: Check ELK idempotency marker
+    - name: Check ELK environment file
       ansible.builtin.stat:
-        path: /opt/redelk/elkserver/.ansible_redelk_installed
-      register: elk_marker
+        path: /opt/redelk/elkserver/.env
+      register: elk_env_file
 
-    - name: Assert ELK marker exists
+    - name: Check ELK self-signed certificate
+      ansible.builtin.stat:
+        path: /opt/redelk/elkserver/mounts/certbot/conf/live/noletsencrypt/fullchain.pem
+      register: elk_self_signed_cert
+
+    - name: Assert ELK server artifacts exist
       ansible.builtin.assert:
         that:
-          - elk_marker.stat.exists
+          - elk_env_file.stat.exists
+          - elk_self_signed_cert.stat.exists
 
 - name: Verify C2 connector
   hosts: c2servers
   gather_facts: false
   tasks:
-    - name: Check C2 idempotency marker
+    - name: Check C2 Filebeat main config
       ansible.builtin.stat:
-        path: /opt/redelk/c2servers/.ansible_redelk_installed
-      register: c2_marker
+        path: /etc/filebeat/filebeat.yml
+      register: c2_filebeat_config
 
-    - name: Assert C2 marker exists
+    - name: Check C2 sync SSH authorized_keys
+      ansible.builtin.stat:
+        path: /home/scponly/.ssh/authorized_keys
+      register: c2_sync_authorized_keys
+
+    - name: Check C2 stage1 cron file
+      ansible.builtin.stat:
+        path: /etc/cron.d/redelk_sync_stage1_data
+      register: c2_stage1_cron
+
+    - name: Assert C2 artifacts exist
       ansible.builtin.assert:
         that:
-          - c2_marker.stat.exists
+          - c2_filebeat_config.stat.exists
+          - c2_sync_authorized_keys.stat.exists
+          - c2_stage1_cron.stat.exists
 
 - name: Verify redirector connector
   hosts: redirs
   gather_facts: false
   tasks:
-    - name: Check redir idempotency marker
+    - name: Check redirector Filebeat main config
       ansible.builtin.stat:
-        path: /opt/redelk/redirs/.ansible_redelk_installed
-      register: redir_marker
+        path: /etc/filebeat/filebeat.yml
+      register: redir_filebeat_config
 
-    - name: Assert redir marker exists
+    - name: Check redirector CA certificate
+      ansible.builtin.stat:
+        path: /etc/filebeat/redelkCA.crt
+      register: redir_ca_cert
+
+    - name: Assert redirector artifacts exist
       ansible.builtin.assert:
         that:
-          - redir_marker.stat.exists
+          - redir_filebeat_config.stat.exists
+          - redir_ca_cert.stat.exists
