@@ -67,6 +67,7 @@ alarms = {
         "enabled": False,
         "interval": 310,
         "notify_interval": 86400,  # Only notify on the same IP hit every 24h by default
+        "backend_filter": "c2*",
     },
     "alarm_useragent": {"enabled": False, "interval": 320},
     "alarm_dummy": {"enabled": False, "interval": 300},
@@ -83,6 +84,8 @@ enrich = {
     "enrich_csbeacon": {"enabled": True, "interval": 300},
     "enrich_stage1": {"enabled": True, "interval": 300},
     "enrich_sliver": {"enabled": True, "interval": 300},
+    "enrich_mythic": {"enabled": True, "interval": 300},
+    "enrich_mythic_downloads": {"enabled": True, "interval": 300},
     "enrich_greynoise": {
         "enabled": True,
         "interval": 310,

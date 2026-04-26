@@ -1,0 +1,17 @@
+- type: log
+  scan_frequency: 5s
+  enabled: true
+  json.keys_under_root: false
+  json.add_error_key: true
+  paths:
+    - /root/Mythic/mythic-docker/redelk.log
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: @@ATTACKSCENARIO@@
+      log:
+        type: rtops
+    c2:
+      program: mythic
+      log:
+        type: events

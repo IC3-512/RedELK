@@ -11,6 +11,7 @@ Authors:
 """
 import logging
 
+import config
 from modules.helpers import get_initial_alarm_result, get_value, raw_search
 
 info = {
@@ -88,6 +89,7 @@ class Module:
 
     def alarm_check(self, alarmed_ips):  # pylint: disable=no-self-use
         """This check queries for IP's that aren't listed in any iplist* but do talk to c2* paths on redirectors"""
+        backend_filter = config.alarms.get("alarm_httptraffic", {}).get("backend_filter", "c2*")
         es_query = {
             "sort": [{"@timestamp": {"order": "desc"}}],
             "query": {
@@ -96,7 +98,7 @@ class Module:
                     "must": {
                         "query_string": {
                             "fields": ["redir.backend.name"],
-                            "query": "c2*",
+                            "query": backend_filter,
                         }
                     },
                     "must_not": [

@@ -48,7 +48,8 @@
         },
         "alarm_httptraffic": {
             "enabled": true,
-            "interval": 310
+            "interval": 310,
+            "backend_filter": "c2*"
         },
         "alarm_useragent": {
             "enabled": true,
@@ -73,6 +74,14 @@
             "interval": 300
         },
         "enrich_sliver": {
+            "enabled": true,
+            "interval": 300
+        },
+        "enrich_mythic": {
+            "enabled": true,
+            "interval": 300
+        },
+        "enrich_mythic_downloads": {
             "enabled": true,
             "interval": 300
         },

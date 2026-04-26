@@ -93,15 +93,20 @@ The indices in RedELK have more fields than listed below. Only the most relevant
 | ------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | beats_input_codec_plain_applied | Filebeat native tag                                                                                       |
 | redirtrafficxforwardedfor       | Indicator for CDN/Domain Fronted traffic, is set when a X-Forwarded-For header is found at the redirector |
-| enrich_greynoise                | Set when enrichment from Greynoise was performed                                                          |
-| iplist_redteam_v0X              | Set when the source IP adress was found to match that of /etc/redelk/iplist_redteam.conf                  |
-| sandboxes_v0X                   | Set when log messages matches with config in /etc/redelkd/known_sandboxes.conf                            |
-| testsystems_v0X                 | Set when log messages matches with config in /etc/redelkd/known_testsystem.conf                           |
-| torexitnodes_v0X                | Set when source IP address matches with config in /etc/redelk/torexitnodes.conf                           |
-| iplist_customer_v0X             | Set when source IP address matches with config in /etc/redelk/iplist_customer.conf                        |
-| iplist_unknown_v0X              | Set when source IP address matches with config in /etc/redelk/iplist_unknwown.conf                        |
-| iplist_alarmed                  | Set when this event was already alarmed
-| redirlongmessagecatchall        | Set when the catchall logstash grok rule was matched (redir.catchall is filled)  |
+| redirlongmessagecatchall        | Set when the catchall logstash grok rule was matched (redir.catchall is filled)                           |
+| enrich_greynoise                | Set when the enrich_greynoise module has performed Greynoise enrichment for this event                    |
+| enrich_iplists                  | Set when the enrich_iplists module has processed this event                                               |
+| enrich_tor                      | Set when the source IP address was identified as a TOR exit node by the enrich_tor module                 |
+| enrich_synciplists              | Set when the enrich_synciplists module has processed this event                                           |
+| enrich_domainslists             | Set when the enrich_syncdomainslists module has processed this event                                      |
+| enrich_domainscategorization    | Set when the enrich_domainscategorization module has processed this event                                 |
+| iplist_redteam                  | Set when the source IP address matches an entry in iplist_redteam                                        |
+| iplist_customer                 | Set when the source IP address matches an entry in iplist_customer                                       |
+| iplist_unknown                  | Set when the source IP address matches an entry in iplist_unknown                                        |
+| iplist_blueteam                 | Set when the source IP address matches an entry in iplist_blueteam                                       |
+| alarm_httptraffic               | Set when the alarm_httptraffic alarm was triggered for this event                                        |
+| alarm_useragent                 | Set when the alarm_useragent alarm was triggered for this event                                          |
+| alarm_backendalarm              | Set when the alarm_backendalarm alarm was triggered for this event                                       |
 
 
 
@@ -185,13 +190,18 @@ The indices in RedELK have more fields than listed below. Only the most relevant
 | type                          | keyword       | string        | Used in rare cases, for example when a log event is duplicated for the implantsdb       |
 | user.name                     | keyword       | string        | Name of the user the implant is running as       |
 
-##### Tags set by RedELK for for index rtops
+##### Tags set by RedELK for index rtops
 
-| Tag name                        | Description                          |
-| ------------------------------- | ------------------------------------ |
-| beats_input_codec_plain_applied | Filebeat native tag                  |
-| \_rubyparseok                   | Logstash Ruby plugin native tag      |
-| enriched_v01                    | Indicator enrich.py ran successfully |
+| Tag name                        | Description                                                                               |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| beats_input_codec_plain_applied | Filebeat native tag                                                                       |
+| \_rubyparseok                   | Logstash Ruby plugin native tag                                                           |
+| enrich_csbeacon                 | Set when the enrich_csbeacon module has enriched this Cobalt Strike event with beacon data |
+| enrich_stage1                   | Set when the enrich_stage1 module has enriched this Stage1 event with initial beacon data |
+| enrich_sliver                   | Set when the enrich_sliver module has enriched this Sliver event with session data        |
+| enrich_mythic                   | Set when the enrich_mythic module has enriched this Mythic event with callback data       |
+| alarm_filehash                  | Set when the alarm_filehash alarm was triggered for this event                            |
+| alarm_manual                    | Set when the alarm_manual alarm was triggered for this event                              |
 
 
 
@@ -226,9 +236,9 @@ The indices in RedELK have more fields than listed below. Only the most relevant
 | process.pid                   | long          | number        | Process ID the implant is running in on the target       |
 | user.name                     | keyword       | string        | Name of the user the implant is running as       |
 
-##### Tags set by RedELK for for index rtops
+##### Tags set by RedELK for index implantsdb
 
-| Tag name                        | Description                          |
-| ------------------------------- | ------------------------------------ |
-| beats_input_codec_plain_applied | Filebeat native tag                  |
-| \_rubyparseok                   | Logstash Ruby plugin native tag      |
+| Tag name                        | Description                     |
+| ------------------------------- | --------------------------------|
+| beats_input_codec_plain_applied | Filebeat native tag             |
+| \_rubyparseok                   | Logstash Ruby plugin native tag |

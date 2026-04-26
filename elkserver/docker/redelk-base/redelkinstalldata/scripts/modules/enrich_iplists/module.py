@@ -120,7 +120,7 @@ class Module:
 
             #  pylint: disable=invalid-name
             for ip in ip_lists[iplist_name]:
-                ip_match.append({"match": {"source.ip": ip}})
+                ip_match.append({"term": {"source.ip": ip}})
 
             es_query = {
                 "bool": {
