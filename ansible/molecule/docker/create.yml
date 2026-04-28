@@ -10,11 +10,6 @@
   tags:
     - always
   tasks:
-    - name: Set async_dir for HOME env
-      ansible.builtin.set_fact:
-        ansible_async_dir: "{{ lookup('env', 'HOME') }}/.ansible_async/"
-      when: lookup('env', 'HOME') is truthy
-
     - name: Log into a Docker registry
       community.docker.docker_login:
         username: "{{ item.registry.credentials.username }}"
@@ -109,15 +104,3 @@
       loop_control:
         label: "{{ item.name }}"
       no_log: false
-      async: 7200
-      poll: 0
-
-    - name: Wait for instance(s) creation to complete
-      ansible.builtin.async_status:
-        jid: "{{ item.ansible_job_id }}"
-      register: docker_jobs
-      until: docker_jobs is finished
-      retries: 300
-      loop: "{{ server.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"

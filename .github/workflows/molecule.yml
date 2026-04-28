@@ -40,7 +40,8 @@ jobs:
           python -m pip install \
             "ansible-core==2.20.4" \
             "molecule==26.3.0" \
-            "molecule-plugins[docker]==25.8.12"
+            "molecule-plugins[docker]==25.8.12" \
+            "passlib"
 
       - name: Install Ansible collections for scenario
         working-directory: ansible
