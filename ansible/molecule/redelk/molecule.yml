@@ -96,6 +96,7 @@ provisioner:
         redelk_logstash_endpoint: redelk.local:5044
   playbooks:
     create: create.yml
+    destroy: destroy.yml
     cleanup: cleanup.yml
     prepare: prepare.yml
     converge: converge.yml
