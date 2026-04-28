@@ -42,7 +42,7 @@ jobs:
             "molecule==26.3.0" \
             "molecule-plugins[docker]==25.8.12"
 
-      - name: Install pinned Ansible collections for scenario
+      - name: Install Ansible collections for scenario
         working-directory: ansible
         run: |
           mkdir -p .ansible/collections
