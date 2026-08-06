@@ -48,6 +48,9 @@ TAG_REVOKED = "enrich_ttp_revoked_technique"
 TAG_DEPRECATED = "enrich_ttp_deprecated_technique"
 
 DEFAULT_MAX_DOCS = 5000
+# Elasticsearch refuses a plain search beyond index.max_result_window, whatever the configuration
+# asks for.
+MAX_RESULT_WINDOW = 10000
 
 
 class Module:
@@ -58,7 +61,7 @@ class Module:
         conf = enrich.get(info["submodule"], {})
         # A larger backlog is drained over several runs, newest first - that is what an operator
         # is looking at while the operation is running.
-        self.max_docs = conf.get("max_docs", DEFAULT_MAX_DOCS)
+        self.max_docs = min(conf.get("max_docs", DEFAULT_MAX_DOCS), MAX_RESULT_WINDOW)
         self.dictionary_path = conf.get("dictionary")
         # An empty path disables the Navigator export.
         self.navigator_layer = conf.get("navigator_layer", navigator.DEFAULT_OUTPUT)
