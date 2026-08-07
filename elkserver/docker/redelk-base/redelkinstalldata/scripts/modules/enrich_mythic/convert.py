@@ -585,12 +585,52 @@ def filemeta_fields(row: dict) -> dict:
         "host": row.get("host") or "",
         "is_screenshot": coerce_bool(row.get("is_screenshot")),
         "is_download": coerce_bool(row.get("is_download_from_agent")),
+        # Absent on a Mythic old enough to lack the column, in which case the query variant that
+        # asks for it fails and the connector falls back - so this reads False and payload builds
+        # are skipped exactly as they were before.
+        "is_payload": coerce_bool(row.get("is_payload")),
         "complete": coerce_bool(row.get("complete")),
         "md5": row.get("md5") or "",
         "sha1": row.get("sha1") or "",
         "size": size,
         "timestamp": row.get("timestamp"),
     }
+
+
+def payload_document(row: dict, ctx: Context) -> Any:
+    """One payload build -> an ioc document carrying its hashes.
+
+    Mythic records the md5 and sha1 of everything it builds, and the whole point of alarm_filehash
+    is to tell you the moment one of your own artefacts turns up on VirusTotal. Until this existed
+    the connector discarded every payload row, so on a Mythic-only deployment that alarm had a
+    VirusTotal key configured and no candidate to ever check: its query is
+    `c2.log.type:ioc AND ioc.type:file`, and the only ioc documents Mythic produced came from
+    taskartifact rows, whose ioc.type is Mythic's base_artifact ("ProcessCreate" and friends).
+
+    Shaped like Cobalt Strike's `[indicator] file:` lines, which is what alarm_filehash was
+    written against.
+    """
+    fields = filemeta_fields(row)
+    document = base_document(ctx, "ioc", fields["timestamp"], fields["timestamp"])
+
+    name = fields["name"] or fields["agent_file_id"]
+    document["ioc"] = {"type": "file", "value": name}
+    document["file"] = prune(
+        {
+            "name": fields["name"],
+            "path": fields["path"],
+            "size": fields["size"],
+            "hash": prune({"md5": fields["md5"], "sha1": fields["sha1"]}),
+        }
+    )
+    document["c2"]["message"] = f"[payload] {name} md5:{fields['md5'] or 'unknown'}"[:MAX_SUMMARY]
+
+    task = _task_of(row)
+    operator = (task.get("operator") or {}) if isinstance(task.get("operator"), dict) else {}
+    if operator.get("username"):
+        document["c2"]["operator"] = operator["username"]
+
+    return _finish(document, fields["timestamp"], "rtops", ctx, "payload", fields["id"])
 
 
 def filemeta_document(row: dict, ctx: Context, local: dict | None = None) -> Any:

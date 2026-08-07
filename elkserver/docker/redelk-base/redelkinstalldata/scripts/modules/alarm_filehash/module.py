@@ -41,6 +41,11 @@ from modules.helpers import (
     set_tags,
 )
 
+# The two provider verdicts that mean the hash was actually looked up. All three providers
+# define the same four constants; vt's are as good as any.
+RESULT_ALARM = vt.RESULT_ALARM
+RESULT_CLEAN = vt.RESULT_CLEAN
+
 info = {
     "version": 0.2,
     "name": "Test file hash against public sources",
@@ -161,7 +166,7 @@ class Module:
 
         alarmed_hashes = self.get_mutations(check_results)
 
-        return self.build_report(md5_dict, alarmed_hashes)
+        return self.build_report(md5_dict, alarmed_hashes, check_results)
 
     def get_recently_seen(self, md5_list):
         """Which of these hashes were checked within the interval, and which were alarmed before?
@@ -276,10 +281,30 @@ class Module:
                     alarmed_hashes.setdefault(md5, {})[engine] = result
         return alarmed_hashes
 
-    def build_report(self, md5_dict, alarmed_hashes):
+    @staticmethod
+    def answered_hashes(check_results):
+        """The hashes at least one provider actually gave a verdict on.
+
+        A provider that ran out of quota or errored reports "skipped, quota reached" or "error".
+        Those are not verdicts, and stamping alarm.last_checked on them means the hash drops out
+        of the query for a whole interval without anyone ever having looked it up - so with a
+        candidate list longer than the daily budget, the tail is never checked at all.
+        """
+        answered = set()
+        for engine_results in check_results.values():
+            for md5, result in engine_results.items():
+                if isinstance(result, dict) and result.get("result") in (
+                    RESULT_ALARM,
+                    RESULT_CLEAN,
+                ):
+                    answered.add(md5)
+        return answered
+
+    def build_report(self, md5_dict, alarmed_hashes, check_results=None):
         """Build report to be returned by the alarm"""
         report = {"mutations": {}, "hits": []}
         checked_clean = []
+        answered = self.answered_hashes(check_results or {})
 
         for md5, iocs in md5_dict.items():
             if md5 in alarmed_hashes:
@@ -292,9 +317,13 @@ class Module:
                         alarmed_hashes[md5]
                     )
                     report["hits"].append(ioc)
-            else:
+            elif md5 in answered:
                 self.logger.debug("md5 hash not alarmed, updating last_checked date: [%s]", md5)
                 checked_clean += iocs
+            else:
+                # Nobody answered - out of quota, or every provider errored. Leave last_checked
+                # alone so the next run picks the hash up again.
+                self.logger.debug("md5 hash was not looked up by any provider: [%s]", md5)
 
         self.mark_checked(checked_clean)
 

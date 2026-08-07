@@ -138,12 +138,12 @@ SELECTIONS: dict[str, list[str]] = {
     "filemeta": [
         """
         id agent_file_id filename_text full_remote_path_text host is_screenshot
-        is_download_from_agent complete md5 sha1 size timestamp task_id chunks_received
+        is_download_from_agent is_payload complete md5 sha1 size timestamp task_id chunks_received
         total_chunks chunk_size
         task { id display_id command_name operator { username } callback { id display_id host user } }
         """,
         """
-        id agent_file_id filename_utf8 full_remote_path_utf8 host is_screenshot
+        id agent_file_id filename_utf8 full_remote_path_utf8 host is_screenshot is_payload
         is_download_from_agent complete md5 sha1 size timestamp task_id chunks_received
         total_chunks chunk_size
         task { id display_id command_name callback { id display_id host user } }

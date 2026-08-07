@@ -328,11 +328,22 @@ class MythicSync:
     def _handle_file(self, row: dict, counter: str) -> bool:
         """Index one filemeta row, downloading its content when it is finished and wanted.
 
-        Returns True when the row has to be looked at again next run. Payload files and files
-        uploaded *to* an agent are skipped: RedELK has no view for them and a payload can be very
-        large.
+        Returns True when the row has to be looked at again next run.
+
+        A payload build is indexed for its hashes alone and never downloaded - it is the operator's
+        own implant, RedELK has no view for it and it can be very large - so that alarm_filehash
+        can tell them when one of their artefacts turns up on VirusTotal. Files uploaded *to* an
+        agent are still skipped entirely.
         """
         fields = convert.filemeta_fields(row)
+        if fields["is_payload"]:
+            if fields["md5"] or fields["sha1"]:
+                self.documents.append(convert.payload_document(row, self.ctx))
+                self._count("payloads")
+            # Mythic hashes a payload when the build finishes, so a row with no hash yet is worth
+            # another look; one that will never have one is not.
+            return not (fields["md5"] or fields["sha1"])
+
         if not (fields["is_screenshot"] or fields["is_download"]):
             return False
 

@@ -98,9 +98,16 @@ class Module:
                 "must": [
                     {
                         "query_string": {
+                            # implant_task as well as implant_input: the API connectors
+                            # (enrich_mythic, enrich_outflankc2) record what an operator typed as
+                            # implant_task and never emit implant_input or events, which only the
+                            # Cobalt Strike / PoshC2 / Sliver logstash filters produce. Without it
+                            # a Mythic operator could put REDELK_ALARM in a task and nothing
+                            # would ever fire.
                             "query": (
                                 "(c2.message:*REDELK_ALARM*) AND "
-                                "(((c2.log.type:implant_input) AND (tags:enrich_*)) OR "
+                                "(((c2.log.type:implant_input OR c2.log.type:implant_task) "
+                                "AND (tags:enrich_*)) OR "
                                 "(c2.log.type:events))"
                             )
                         }

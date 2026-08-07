@@ -279,6 +279,12 @@ file-based frameworks, with `c2.program: mythic`. The ATT&CK metadata Mythic att
 is turned into the `threat.*` block at ingest; anything that arrives as a bare identifier is
 resolved afterwards by `enrich_ttp`. See [ttp-tracking.md](ttp-tracking.md).
 
+Payload builds are indexed for their hashes as `c2.log.type:ioc` / `ioc.type:file` documents, the
+same shape Cobalt Strike's `[indicator] file:` lines get, so `alarm_filehash` tells you when one of
+your own artefacts appears on VirusTotal. The file itself is never downloaded - it is your implant,
+and it can be very large. A Mythic too old to have the `is_payload` column falls back to the older
+selection and simply produces no such documents.
+
 A task is two documents, like everywhere else in RedELK: an `implant_task` line for the tasking and,
 once Mythic marks it completed, an `implant_taskcomplete` line for the result. The ATT&CK mapping
 sits on the tasking line - Mythic only creates its `attacktask` rows once the agent fetches the

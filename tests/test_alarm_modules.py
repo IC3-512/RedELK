@@ -542,3 +542,55 @@ def test_manual_alarm_deduplicates_on_the_message(daemon_env):
     # them again through groupby.
     assert [document["_id"] for document in result["hits"]["hits"]] == ["new1", "new2"]
     assert result["groupby"] == ["c2.message"]
+
+
+# ------------------------------------------------------------------------------------------------
+# alarm_filehash: a hash nobody looked up must not be recorded as checked
+# ------------------------------------------------------------------------------------------------
+
+
+def test_filehash_does_not_mark_unanswered_hashes_as_checked(daemon_env):
+    """Out of quota is not a verdict.
+
+    Stamping alarm.last_checked on a hash no provider actually looked up drops it out of the
+    query for a whole interval. With more candidates than the daily budget - which is the normal
+    case on a build-heavy operation - the tail of the list was never checked at all.
+    """
+    env = daemon_env({"alarms": {"alarm_filehash": {"enabled": True}}})
+    module = load(env, "alarm_filehash")
+
+    ioc = {"_id": "doc1", "_index": "rtops-2026.05.01", "_source": {}}
+    md5_dict = {"aaa": [ioc], "bbb": [dict(ioc, _id="doc2")], "ccc": [dict(ioc, _id="doc3")]}
+    check_results = {
+        "VirusTotal": {
+            "aaa": {"result": "clean"},
+            "bbb": {"result": "skipped, quota reached"},
+            "ccc": {"result": "error"},
+        }
+    }
+
+    instance = module.Module()
+    marked = []
+    instance.mark_checked = lambda iocs: marked.extend(i["_id"] for i in iocs)
+    instance.build_report(md5_dict, {}, check_results)
+
+    assert marked == ["doc1"], f"marked {marked}; only the hash with a real verdict may be stamped"
+
+
+def test_filehash_still_marks_a_clean_hash_when_another_provider_failed(daemon_env):
+    """One provider answering is enough - the hash was looked up."""
+    env = daemon_env({"alarms": {"alarm_filehash": {"enabled": True}}})
+    module = load(env, "alarm_filehash")
+
+    ioc = {"_id": "doc1", "_index": "rtops-2026.05.01", "_source": {}}
+    check_results = {
+        "VirusTotal": {"aaa": {"result": "error"}},
+        "IBM": {"aaa": {"result": "clean"}},
+    }
+
+    instance = module.Module()
+    marked = []
+    instance.mark_checked = lambda iocs: marked.extend(i["_id"] for i in iocs)
+    instance.build_report({"aaa": [ioc]}, {}, check_results)
+
+    assert marked == ["doc1"]

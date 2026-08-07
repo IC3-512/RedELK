@@ -759,3 +759,55 @@ class LiveMythicRegressionTests(unittest.TestCase):
             "Linux mythic-lab 6.8.0-136-generic #136-Ubuntu SMP x86_64",
         )
         self.assertNotIn("\n", source["host"]["os"]["full"])
+
+
+PAYLOAD_ROW = {
+    "id": 77,
+    "agent_file_id": "99887766-5544-3322-1100-aabbccddeeff",
+    "filename_text": b64("poseidon_linux"),
+    "full_remote_path_text": b64(""),
+    "host": "",
+    "is_screenshot": False,
+    "is_download_from_agent": False,
+    "is_payload": True,
+    "complete": True,
+    "md5": "97865a6cdf078d043f380f214b96f9f6",
+    "sha1": "0123456789abcdef0123456789abcdef01234567",
+    "size": 7997384,
+    "timestamp": "2026-05-01T09:00:00.000000",
+    "task": {"id": 1, "operator": {"username": "operator1"}},
+}
+
+
+class PayloadTests(unittest.TestCase):
+    """Payload builds carry the hashes alarm_filehash exists to check.
+
+    The connector used to discard every filemeta row that was neither a screenshot nor a download,
+    so on a Mythic-only deployment alarm_filehash - whose query is
+    `c2.log.type:ioc AND ioc.type:file` - never had a single candidate, however many payloads the
+    operator built and however carefully they configured a VirusTotal key.
+    """
+
+    def test_a_payload_becomes_a_file_ioc(self):
+        doc = convert.payload_document(PAYLOAD_ROW, CTX)
+        self.assertEqual(doc.source["c2"]["log"]["type"], "ioc")
+        self.assertEqual(doc.source["ioc"]["type"], "file")
+        self.assertEqual(doc.source["ioc"]["value"], "poseidon_linux")
+        self.assertEqual(doc.source["file"]["hash"]["md5"], "97865a6cdf078d043f380f214b96f9f6")
+        self.assertEqual(doc.source["file"]["name"], "poseidon_linux")
+        self.assertEqual(doc.source["file"]["size"], 7997384)
+        self.assertEqual(doc.source["c2"]["operator"], "operator1")
+        self.assertEqual(doc.doc_id, "mythic-mythic1-payload-77")
+
+    def test_the_ioc_matches_what_alarm_filehash_queries_for(self):
+        """alarm_filehash: c2.log.type:ioc AND ioc.type:file AND a file.hash.md5 to look up."""
+        source = convert.payload_document(PAYLOAD_ROW, CTX).source
+        self.assertEqual(source["c2"]["log"]["type"], "ioc")
+        self.assertEqual(source["ioc"]["type"], "file")
+        self.assertTrue(source["file"]["hash"]["md5"])
+
+    def test_is_payload_is_read_and_defaults_to_false(self):
+        self.assertTrue(convert.filemeta_fields(PAYLOAD_ROW)["is_payload"])
+        # A Mythic too old to have the column: the query variant asking for it fails, the
+        # connector falls back, and payload rows are skipped exactly as they were before.
+        self.assertFalse(convert.filemeta_fields(DOWNLOAD_ROW)["is_payload"])
