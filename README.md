@@ -16,9 +16,21 @@ infrastructure.
    IP lists, GreyNoise, Tor exit nodes and domain categorisation, so a query can tell you that
    somebody is walking your infrastructure.
 
-![RedELK overview dashboard](./images/dashboard-overview.png)
+![RedELK operations overview](./images/dashboard-overview.png)
 
 ![RedELK redirector traffic](./images/dashboard-traffic.png)
+
+RedELK ships nine dashboards. The rest:
+
+| | |
+|---|---|
+| [MITRE ATT&CK coverage](./images/dashboard-mitre.png) | Which techniques and tactics the operation actually executed, from the C2's own metadata. |
+| [Implants](./images/dashboard-implants.png) | Every implant, its host, user, process and check-in. |
+| [Alarms](./images/dashboard-alarms.png) | What the alarm modules flagged, and the traffic behind it. |
+| [Screenshots](./images/dashboard-screenshots.png) | Screenshots pulled from the C2, inline. |
+| [Downloads](./images/dashboard-downloads.png) | Files the implants retrieved, with hashes and sizes. |
+| [Credentials](./images/dashboard-credentials.png) | Credentials the operation collected. |
+| [Health](./images/dashboard-health.png) | Whether every enrichment and alarm module is actually running. |
 
 ## Quickstart
 
