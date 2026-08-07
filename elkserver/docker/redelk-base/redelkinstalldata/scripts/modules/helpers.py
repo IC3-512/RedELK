@@ -31,6 +31,7 @@ import datetime
 import json
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any, Iterator
 from urllib.parse import urlsplit, urlunsplit
 
@@ -155,12 +156,21 @@ def match_domain_name(domain: str) -> re.Match | None:
 
 
 def get_value(path: str, source: Any, default_value: Any = None) -> Any:
-    """Read a dotted path out of a nested dict, returning default_value when it is absent.
+    """Read a dotted path out of a nested mapping, returning default_value when it is absent.
 
     The previous implementation forgot to pass default_value down the recursion, so any missing
     nested key returned None regardless of what the caller asked for.
+
+    elasticsearch-py 9 hands back an ObjectApiResponse, which is neither a dict nor even a
+    Mapping - it wraps the payload in `.body`. Testing for dict made every read taken straight
+    off an Elasticsearch response return the default, so get_last_run() fell back to the epoch on
+    every call. That silently turned enrich_greynoise and enrich_tor into permanent no-ops: both
+    filter on `@timestamp <= last_run`, and no document is older than 1970.
     """
-    if not isinstance(source, dict):
+    body = getattr(source, "body", None)
+    if isinstance(body, Mapping):
+        source = body
+    if not isinstance(source, Mapping):
         return default_value
 
     head, _, tail = path.partition(".")

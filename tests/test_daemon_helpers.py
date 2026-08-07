@@ -66,6 +66,38 @@ def test_get_value_returns_none_when_no_default_is_given(helpers):
     assert helpers.helpers.get_value("nope.nothing", {"nope": {}}) is None
 
 
+def test_get_value_reads_straight_off_an_elasticsearch_response(helpers):
+    """elasticsearch-py 9 returns ObjectApiResponse, which is not a dict and not even a Mapping.
+
+    Every read taken directly off a response used to return the default. get_last_run() is the
+    one that mattered: it fell back to the epoch on every call, and enrich_greynoise and
+    enrich_tor both select `@timestamp <= last_run`, so they matched nothing and enriched nothing
+    while reporting success. Confirmed against a live Elasticsearch 9.5.0 before this was fixed.
+    """
+
+    class FakeApiResponse:
+        """Shaped like elastic_transport.ObjectApiResponse: a .body payload, no Mapping bases."""
+
+        def __init__(self, body):
+            self.body = body
+
+        def __getitem__(self, key):
+            return self.body[key]
+
+        def get(self, key, default=None):
+            return self.body.get(key, default)
+
+    response = FakeApiResponse(
+        {"found": True, "_source": {"module": {"last_run": {"timestamp": "2026-08-07T13:09:39Z"}}}}
+    )
+    assert not isinstance(response, dict)
+    assert helpers.helpers.get_value("_source.module.last_run.timestamp", response) == (
+        "2026-08-07T13:09:39Z"
+    )
+    # A response whose body does not carry the path still falls back, rather than raising.
+    assert helpers.helpers.get_value("_source.missing", FakeApiResponse({}), "d") == "d"
+
+
 def test_get_value_unwraps_the_ecs_ip_array(helpers):
     """host.ip is an array in ECS; every caller of this helper wants a single address."""
     assert helpers.helpers.get_value("host.ip", {"host": {"ip": ["10.0.0.1", "10.0.0.2"]}}) == (
