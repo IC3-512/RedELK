@@ -1,151 +1,193 @@
 {
-    "aliases": {},
-    "index_patterns": [
-        "bluecheck"
-    ],
+  "index_patterns": [
+    "bluecheck-*"
+  ],
+  "priority": 200,
+  "composed_of": [
+    "redelk-ecs-base",
+    "redelk-common",
+    "redelk-lists"
+  ],
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "redelk",
+      "index.number_of_shards": 1,
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "5s",
+      "index.mapping.total_fields.limit": 10000
+    },
     "mappings": {
-        "_meta": {},
-        "_source": {},
-        "properties": {
-            "bluecheck": {
-                "properties": {
-                    "accountname": {
-                        "type": "text"
-                    },
-                    "accountstate": {
-                        "type": "text"
-                    },
-                    "certissuer ": {
-                        "type": "text"
-                    },
-                    "certsubject": {
-                        "type": "text"
-                    },
-                    "message": {
-                        "type": "text"
-                    },
-                    "pwchangedate": {
-                        "type": "date"
-                    },
-                    "sectools": {
-                        "properties": {
-                            "ProcessID": {
-                                "type": "text"
-                            },
-                            "Product": {
-                                "type": "text"
-                            },
-                            "Vendor": {
-                                "type": "text"
-                            }
-                        },
-                        "type": "nested"
-                    },
-                    "sectoolsamount": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
+      "dynamic": true,
+      "date_detection": false,
+      "numeric_detection": false,
+      "properties": {
+        "bluecheck": {
+          "properties": {
+            "accountname": {
+              "type": "keyword",
+              "ignore_above": 1024
             },
-            "bluechecktimestamp": {
-                "type": "text"
+            "accountstate": {
+              "type": "keyword",
+              "ignore_above": 1024
             },
-            "bluechecktype": {
-                "type": "text"
+            "certissuer": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
             },
-            "classifier": {
-                "type": "keyword"
-            },
-            "domain": {
-                "type": "keyword"
-            },
-            "host": {
-                "properties": {
-                    "domain_ext": {
-                        "type": "text"
-                    },
-                    "ip": {
-                        "type": "ip"
-                    },
-                    "ip_ext": {
-                        "type": "ip"
-                    },
-                    "ip_int": {
-                        "type": "ip"
-                    },
-                    "name": {
-                        "type": "text"
-                    },
-                    "os": {
-                        "dynamic": true,
-                        "enabled": true,
-                        "properties": {
-                            "family": {
-                                "type": "text"
-                            },
-                            "full": {
-                                "type": "text"
-                            },
-                            "kernel": {
-                                "type": "text"
-                            },
-                            "name": {
-                                "type": "text"
-                            },
-                            "platform": {
-                                "type": "text"
-                            },
-                            "version": {
-                                "type": "text"
-                            }
-                        },
-                        "type": "object"
-                    }
-                },
-                "type": "object"
-            },
-            "infra": {
-                "properties": {
-                    "attack_scenario": {
-                        "type": "keyword"
-                    }
-                },
-                "type": "object"
+            "certsubject": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
             },
             "message": {
-                "type": "text"
+              "type": "text",
+              "norms": false
             },
-            "path": {
-                "type": "keyword"
+            "pwchangedate": {
+              "type": "date",
+              "ignore_malformed": true
             },
-            "pstools": {
-                "properties": {
-                    "psx": {
-                        "properties": {
-                            "edr_name": {
-                                "type": "text"
-                            },
-                            "security_product": {
-                                "type": "text"
-                            }
-                        },
-                        "type": "object"
-                    },
-                    "tool": {
-                        "type": "text"
-                    }
+            "sectools": {
+              "type": "nested",
+              "properties": {
+                "ProcessID": {
+                  "type": "keyword",
+                  "ignore_above": 1024
                 },
-                "type": "object"
+                "Product": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "Vendor": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
             },
-            "results": {
-                "type": "text"
+            "sectoolsamount": {
+              "type": "integer"
             },
-            "type": {
-                "type": "keyword"
+            "uri": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
             }
+          }
+        },
+        "bluechecktimestamp": {
+          "type": "keyword",
+          "ignore_above": 1024
+        },
+        "bluechecktype": {
+          "type": "keyword",
+          "ignore_above": 1024
+        },
+        "classifier": {
+          "type": "keyword",
+          "ignore_above": 1024
+        },
+        "domain": {
+          "type": "keyword",
+          "ignore_above": 1024
+        },
+        "path": {
+          "type": "keyword",
+          "ignore_above": 1024
+        },
+        "pstools": {
+          "properties": {
+            "footer": {
+              "type": "text",
+              "norms": false
+            },
+            "full_output": {
+              "type": "text",
+              "norms": false
+            },
+            "header": {
+              "type": "text",
+              "norms": false
+            },
+            "items": {
+              "type": "text",
+              "norms": false
+            },
+            "psx": {
+              "properties": {
+                "edr_name": {
+                  "type": "keyword",
+                  "ignore_above": 1024,
+                  "fields": {
+                    "text": {
+                      "type": "text",
+                      "norms": false
+                    }
+                  }
+                },
+                "processes": {
+                  "type": "text",
+                  "norms": false
+                },
+                "security_products": {
+                  "type": "text",
+                  "norms": false
+                },
+                "summary": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
+            },
+            "tool": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "version": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        },
+        "results": {
+          "type": "keyword",
+          "ignore_above": 1024,
+          "fields": {
+            "text": {
+              "type": "text",
+              "norms": false
+            }
+          }
+        },
+        "type": {
+          "type": "keyword",
+          "ignore_above": 1024
         }
-    },
-    "order": 0,
-    "settings": {},
-    "version": 1
+      }
+    }
+  },
+  "_meta": {
+    "managed_by": "redelk",
+    "description": "Signs that the blue team is looking at the operation: BLUECHECK output cloned out of the C2 logs, Outflank PStools findings, and domain categorization changes. The index pattern is bluecheck-* because the logstash output writes bluecheck-%{+YYYY.MM.dd} and modules/enrich_domainscategorization writes bluecheck-domains; the pre-v3 template said 'bluecheck' without a wildcard and therefore never matched a single index. The domainslist.* fields of those categorization documents come from the redelk-lists component.",
+    "authors": [
+      "Outflank B.V. / Marc Smeets",
+      "Lorenzo Bernardi (@fastlorenzo)"
+    ]
+  }
 }

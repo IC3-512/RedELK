@@ -1,18 +1,50 @@
+---
+####################################################################################################
+# RedELK example inventory
+#
+# THE HOST NAMES HERE MUST MATCH THE NAMES IN ../redelk.yml.
+#
+#   redelk.yml                              inventory.yml
+#   -------------------------------------   ------------------------------
+#   c2_servers:                             c2servers:
+#     - name: c2server1              <--->      hosts:
+#       type: cobaltstrike                        c2server1:
+#
+#   redirectors:                            redirs:
+#     - name: redir1                 <--->      hosts:
+#       type: haproxy                             redir1:
+#
+# './redelkctl generate' writes one installation package per name into build/packages/<name>/, and
+# the inventory host name is what picks it. A host without a matching package aborts the run with
+# an explanation before anything is changed. If you cannot rename the inventory host, point it at
+# its package with 'redelk_package_name' instead (see the redir2 example below).
+#
+# The elkservers group is not name-bound: that host receives the repository, not a package. Keep it
+# to exactly one host - RedELK is a single-server stack.
+####################################################################################################
+
 elkservers:
   hosts:
-    host1:
-      ansible_host: 10.0.0.1
+    redelk:
+      ansible_host: 198.51.100.10
       ansible_user: root
 
 c2servers:
   hosts:
-    host2:
-      ansible_host: 10.0.0.2
+    # == c2_servers[].name in redelk.yml
+    c2server1:
+      ansible_host: 198.51.100.20
       ansible_user: root
 
 redirs:
   hosts:
-    host3:
-      ansible_host: 192.168.0.1
+    # == redirectors[].name in redelk.yml
+    redir1:
+      ansible_host: 198.51.100.30
       ansible_user: root
-      associated_backend: host2
+
+    # An inventory host whose name cannot match redelk.yml: point it at its package by hand.
+    redir2:
+      ansible_host: 198.51.100.31
+      ansible_user: root
+      redelk_package_name: redir-frontend-eu

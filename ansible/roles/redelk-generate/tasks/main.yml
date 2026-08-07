@@ -1,0 +1,101 @@
+---
+# Everything in this role runs on the control node. It produces nothing of its own: it calls
+# redelkctl and then checks that the inventory and redelk.yml agree about host names.
+
+# Not needed when redelk_generate is false: that mode deploys the packages that are already in
+# build/packages/, which is how you deploy from a machine that does not hold redelk.yml.
+- name: Look for redelk.yml on the control node
+  delegate_to: localhost
+  become: false
+  run_once: true
+  ansible.builtin.stat:
+    path: "{{ redelk_repo_path }}/{{ redelk_config_file }}"
+  register: redelk_generate_config
+  when: redelk_generate | bool
+
+- name: Fail when the control node has no RedELK configuration
+  run_once: true
+  when: redelk_generate | bool
+  ansible.builtin.assert:
+    that:
+      - redelk_generate_config.stat.exists
+    fail_msg: >-
+      {{ redelk_repo_path }}/{{ redelk_config_file }} does not exist. Ansible deliberately does not
+      invent one: run './redelkctl init' in {{ redelk_repo_path }}, fill in server.hostnames, your
+      c2_servers and your redirectors, and run this playbook again.
+    quiet: true
+
+# redelkctl is idempotent and rewrites only what drifted, so the exit code says nothing about
+# change. It prints one "wrote <path>" line per file it actually replaced; that is the signal.
+- name: Generate the configuration, certificates and per-host packages
+  delegate_to: localhost
+  become: false
+  run_once: true
+  ansible.builtin.command:
+    argv:
+      - ./redelkctl
+      - --config
+      - "{{ redelk_config_file }}"
+      - generate
+    chdir: "{{ redelk_repo_path }}"
+  register: redelk_generate_result
+  changed_when: "' wrote ' in redelk_generate_result.stdout"
+  when: redelk_generate | bool
+
+- name: Show what redelkctl generated
+  run_once: true
+  ansible.builtin.debug:
+    var: redelk_generate_result.stdout_lines
+    verbosity: 1
+  when: redelk_generate | bool
+
+- name: List the installation packages
+  delegate_to: localhost
+  become: false
+  run_once: true
+  ansible.builtin.find:
+    paths: "{{ redelk_packages_path }}"
+    file_type: directory
+  register: redelk_generate_package_dirs
+
+- name: Check that this host has an installation package
+  vars:
+    redelk_generate_available: >-
+      {{ redelk_generate_package_dirs.files | map(attribute='path') | map('basename') | sort }}
+  ansible.builtin.assert:
+    that:
+      - redelk_package_name in redelk_generate_available
+    fail_msg: |-
+      No installation package for inventory host '{{ inventory_hostname }}'.
+      The inventory host name selects the package, and
+      {{ redelk_packages_path }}/{{ redelk_package_name }}/ does not exist.
+      Packages that do exist: {{ redelk_generate_available | join(', ') | default('(none)', true) }}
+      Fix it in one of these ways:
+        - add a c2_servers or redirectors entry named '{{ redelk_package_name }}' to redelk.yml
+        - rename this inventory host to one of the packages listed above
+        - set redelk_package_name on this host to the package it should receive
+      API-based C2 servers (mythic, outflankc2) are polled by the RedELK server and never get a
+      package - those belong in redelk.yml only, not in this inventory.
+    quiet: true
+  when: "'c2servers' in group_names or 'redirs' in group_names"
+
+- name: Warn about packages that no host in this inventory will receive
+  vars:
+    redelk_generate_shippers: >-
+      {{ (groups['c2servers'] | default([])) + (groups['redirs'] | default([])) }}
+    # A package is claimed when its name is an inventory host name, or when some host points at it
+    # with redelk_package_name.
+    redelk_generate_wanted: >-
+      {{ redelk_generate_shippers
+         + (redelk_generate_shippers | map('extract', hostvars, 'redelk_package_name')
+            | select('defined') | list) }}
+    redelk_generate_orphans: >-
+      {{ redelk_generate_package_dirs.files | map(attribute='path') | map('basename')
+         | difference(redelk_generate_wanted) | sort }}
+  run_once: true
+  ansible.builtin.debug:
+    msg: >-
+      redelk.yml builds packages that no host in this inventory claims, so nothing will ship their
+      logs: {{ redelk_generate_orphans | join(', ') }}. Add them to the inventory, or install them
+      by hand: 'scp -r build/packages/<name> <host>: && ssh <host> sudo ./<name>/install.py'.
+  when: redelk_generate_orphans | length > 0

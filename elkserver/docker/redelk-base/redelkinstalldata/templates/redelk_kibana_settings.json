@@ -1,13 +1,11 @@
 {
   "changes": {
-    "theme:darkMode": true,
-    "telemetry:optIn": false,
-    "siem:enableNewsFeed": false,
-    "siem:defaultIndex": ["apm-*-transaction*","auditbeat-*","endgame-*","filebeat-*","packetbeat-*","winlogbeat-*","rtops-*","redirtraffic-*"],
-    "defaultIndex": "195a3f00-d04f-11ea-9301-a30a04251ae9",
-    "defaultRoute": "/app/discover#/view/1c580960-b6a9-11e8-bc1a-cf8fa3255855",
-    "shortDots:enable": false,
-    "telemetry:enabled": false,
-    "timepicker:timeDefaults": "{\"from\": \"now-7d\",\"to\": \"now\"}"
+    "defaultIndex": "redelk-rtops",
+    "defaultRoute": "/app/dashboards#/view/redelk-dashboard-operations",
+    "theme:darkMode": "enabled",
+    "dateFormat:tz": "UTC",
+    "timepicker:timeDefaults": "{\"from\": \"now-7d\", \"to\": \"now\"}",
+    "doc_table:highlight": false,
+    "discover:sampleSize": 500
   }
 }

@@ -1,0 +1,26 @@
+---
+####################################################################################################
+# How Ansible REACHES the hosts.
+#
+# Nothing about WHAT RedELK deploys belongs in this file - that all lives in ../redelk.yml and is
+# turned into artefacts by ./redelkctl. If you find yourself adding a RedELK setting here, it
+# belongs in redelk.yml instead.
+####################################################################################################
+
+# redelkctl writes root-owned files (0600 .env, TLS keys) and install.py needs root on the
+# shippers, so every play escalates. Passwordless sudo is required: the repository is copied with
+# rsync, which runs 'sudo rsync' on the far end and cannot answer a password prompt.
+ansible_become: true
+
+# The RedELK repository on the control node: the directory holding redelk.yml and ./redelkctl.
+redelk_repo_path: "{{ playbook_dir | dirname }}"
+
+# The configuration file redelkctl reads, relative to redelk_repo_path.
+redelk_config_file: redelk.yml
+
+# Where './redelkctl generate' writes the per-host installation packages.
+redelk_packages_path: "{{ redelk_repo_path }}/build/packages"
+
+# Where RedELK lands on the remote hosts: the repository on the server, the host's package on the
+# redirectors and C2 servers.
+redelk_remote_base_path: /opt/redelk

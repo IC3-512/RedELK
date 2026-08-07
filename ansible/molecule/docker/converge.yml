@@ -3,4 +3,4 @@
   hosts: docker_hosts
   gather_facts: true
   roles:
-    - docker
+    - role: docker

@@ -1,0 +1,144 @@
+{{ header }}
+# nginx site configuration for RedELK, rendered from redelk.yml.
+#
+# nginx's own entrypoint runs envsubst over this file, so ${VARIABLES} that survive here are
+# substituted from the container environment at start-up. Everything that depends on the RedELK
+# profile is resolved by redelkctl instead, which is why there are no commented-out include
+# lines for the installer to sed in and out any more.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80 default_server;
+    server_tokens off;
+
+    # Let's Encrypt HTTP-01 challenge.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# TLS settings follow the Mozilla "intermediate" profile.
+server {
+    listen 443 ssl;
+    http2 on;
+    server_tokens off;
+
+    root /var/www/html;
+    index index.html index.htm;
+    autoindex on;
+
+    auth_basic "RedELK";
+    auth_basic_user_file /etc/nginx/conf.d/htpasswd.users;
+
+    ssl_certificate ${TLS_NGINX_CRT_PATH};
+    ssl_certificate_key ${TLS_NGINX_KEY_PATH};
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:MozSSL:10m;
+    ssl_session_tickets off;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_dhparam /etc/nginx/conf.d/ssl-dhparams.pem;
+    ssl_trusted_certificate ${TLS_NGINX_CA_PATH};
+
+    add_header Strict-Transport-Security "max-age=63072000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass https://redelk-kibana:5601;
+        proxy_http_version 1.1;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Port  $server_port;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+        proxy_set_header Host              $host;
+        # Kibana serves its own RedELK-CA-signed certificate on the internal network.
+        proxy_ssl_trusted_certificate ${TLS_NGINX_CA_PATH};
+        proxy_ssl_verify on;
+        proxy_ssl_verify_depth 2;
+        proxy_ssl_name redelk-kibana;
+        proxy_read_timeout 300s;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Screenshots, downloads and keystroke files pulled off the C2 servers, plus the generated
+    # ATT&CK Navigator layer.
+    location /c2logs {
+        try_files $uri $uri/ =404;
+        autoindex on;
+
+        location ~* \.(txt|log)$ {
+            add_header Content-Type text/plain;
+            add_header X-Content-Type-Options nosniff;
+        }
+        location ~* \.(jpg|jpeg|png)$ {
+            add_header Content-Type image/jpeg;
+        }
+        location ~* \.json$ {
+            add_header Content-Type application/json;
+        }
+    }
+
+{% if full %}
+    location /jupyter {
+        proxy_pass http://redelk-jupyter:8888;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host       $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_read_timeout 86400;
+    }
+{% endif %}
+}
+
+{% if full %}
+# BloodHound Community Edition. It ships its own login, but it is additionally protected by the
+# same basic auth as the rest of RedELK so that a BloodHound authentication bypass is not enough
+# to reach it.
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_tokens off;
+
+    ssl_certificate ${TLS_NGINX_CRT_PATH};
+    ssl_certificate_key ${TLS_NGINX_KEY_PATH};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_dhparam /etc/nginx/conf.d/ssl-dhparams.pem;
+
+    add_header Strict-Transport-Security "max-age=63072000" always;
+
+    auth_basic "RedELK";
+    auth_basic_user_file /etc/nginx/conf.d/htpasswd.users;
+
+    client_max_body_size 500m;
+
+    location / {
+        proxy_pass http://redelk-bloodhound-app:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 600s;
+    }
+}
+{% endif %}

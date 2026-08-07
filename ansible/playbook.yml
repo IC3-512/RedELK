@@ -1,50 +1,46 @@
 ---
-- hosts: all
+####################################################################################################
+# RedELK deployment over ssh
+#
+# This playbook owns no configuration of its own. ../redelk.yml is the single source of truth,
+# ./redelkctl turns it into artefacts, and Ansible only carries those artefacts to the hosts and
+# runs the installers that redelkctl generated.
+#
+#   ansible-playbook -i inventory.yml playbook.yml
+#
+# The inventory host names of the c2servers and redirs groups must match the 'name' fields in
+# redelk.yml, because that name selects the package under build/packages/. See inventory.yml.
+####################################################################################################
+
+- name: Generate the RedELK artefacts from redelk.yml
+  hosts: all
   gather_facts: false
   tags:
-    - pre
-  pre_tasks:
-    - name: Check known_hosts for all hosts
-      ansible.builtin.command:
-        argv:
-          - ssh-keygen
-          - -F
-          - "{{ ansible_host }}"
-      delegate_to: localhost
-      register: has_entry_in_known_hosts_file
-      changed_when: false
-      failed_when: false
-
-    - name: Ignore host key on first run
-      when: has_entry_in_known_hosts_file.rc == 1
-      ansible.builtin.set_fact:
-        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
-
-    - name: Delayed gathering of facts
-      ansible.builtin.setup:
-
+    - generate
   roles:
-    - name: redelk-package-prep
-      when: redelk_generate_packages | bool
-      tags: pre
+    # Runs on the control node only, once, and then checks that every host in the inventory has a
+    # package waiting for it. Skip with --skip-tags generate to deploy what is already in
+    # build/packages/.
+    - role: redelk-generate
 
-- hosts: elkservers
+- name: Deploy the RedELK server
+  hosts: elkservers
+  gather_facts: true
   roles:
-    - name: docker
-      tags: redelk-server
-    - name: redelk-server
-      tags: redelk-server
+    - role: docker
+      # Defined in group_vars/elkservers.yml; defaulted here so the playbook also works with an
+      # inventory that does not use the group_vars shipped next to it.
+      when: redelk_install_docker | default(true) | bool
+      tags:
+        - docker
+    - role: redelk-server
+      tags:
+        - server
 
-- hosts: c2servers
+- name: Deploy the redirector and C2 server shippers
+  hosts: c2servers:redirs
+  gather_facts: true
   roles:
-    - name: redelk-client
-      when: deploy_redelk == true
-      tags: redelk-client
-
-- hosts: redirs
-  roles:
-    - name: redir
-      tags: redir
-    - name: redelk-client
-      when: deploy_redelk == true
-      tags: redelk-client
+    - role: redelk-client
+      tags:
+        - client

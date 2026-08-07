@@ -1,153 +1,165 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 """
 Part of RedELK
 
-This script checks for domain categorization data in VirusTotal
+Domain categorization from VirusTotal.
+
+Fixed in v3:
+  * Every check asked for the account quota first, so each domain cost two API calls instead of
+    one. The quota is fetched once per run and counted down locally.
+  * No request had a timeout.
+  * Without an API key the module used to send unauthenticated requests that VirusTotal answers
+    with 401; it now reports itself as unavailable and is skipped.
 
 Authors:
 - Lorenzo Bernardi (@fastlorenzo)
+- RedELK contributors
 """
+
+from __future__ import annotations
 
 import logging
 
 import requests
 from config import enrich
-from modules.helpers import get_value
+from modules.helpers import HTTP_TIMEOUT, get_value, now_iso
+
+API_URL = "https://www.virustotal.com/api/v3"
 
 
 class VT:
-    """This script checks for domain categorization data in VirusTotal"""
+    """Domain categorization from VirusTotal."""
+
+    # The key this engine's verdict is stored under in domainslist.categorization.engines.
+    NAME = "vt"
 
     def __init__(self):
-        self.logger = logging.getLogger("enrich_domaincategorization.vt")
-        self.api_key = get_value("enrich_domainscategorization.vt_api_key", enrich)
+        self.logger = logging.getLogger("enrich_domainscategorization.vt")
+        self.api_key = str(get_value("enrich_domainscategorization.vt_api_key", enrich, "") or "")
+        # None means "not asked yet"; the quota costs one request per run, not one per domain.
+        self.remaining_quota = None
 
-    def check_domain(self, domain):
-        """Check the domain categoriation in VirusTotal"""
-        result = {
+    @property
+    def enabled(self) -> bool:
+        """VirusTotal cannot be queried at all without an API key."""
+        return bool(self.api_key)
+
+    def empty_result(self, domain, status="skipped"):  # pylint: disable=no-self-use
+        """The result shape every engine returns, with nothing in it."""
+        return {
             "domain": domain,
             "categories": [],
-            "status": "unknown",
+            "status": status,
             "response_code": -1,
             "extra_data": {},
-            "last_checked": None,
+            "last_checked": now_iso(),
         }
 
-        # Get the remaining quota for this run
-        remaining_quota = self.get_remaining_quota()
-        if remaining_quota == 0:
-            self.logger.warning("No remaining quota, skipping VT check")
-            result["status"] = "skipped"
+    def check_domain(self, domain):
+        """Check the domain categorization in VirusTotal. Never raises."""
+        result = self.empty_result(domain)
+
+        if not self.enabled:
             return result
 
-        # Within quota, let's check the file hash with VT
+        if self.remaining_quota is None:
+            self.remaining_quota = self.get_remaining_quota()
+
+        if self.remaining_quota <= 0:
+            self.logger.warning("No remaining quota, skipping VT check")
+            return result
+
         self.logger.debug("Checking domain %s", domain)
         vt_result = self.get_vt_domain_results(domain)
-        self.logger.debug("Response: %s", vt_result)
+        self.remaining_quota -= 1
 
-        if (
-            vt_result is not None
-            and isinstance(vt_result, type({}))
-            and "data" in vt_result
-        ):
-            result["status"] = "found"
-
-            vt_cats = get_value("data.attributes.categories", vt_result, {})
-            result["extra_data"]["record"] = get_value("data.attributes", vt_result, {})
-
-            # Parse the categories
-            for cat in vt_cats:
-                result["categories"].extend(
-                    [x.strip() for x in vt_cats[cat].split(",")]
-                )
-
-            # # Get first submission date
-            # first_submitted_ts = get_value(
-            #     "data.attributes.first_submission_date", vt_result, None
-            # )
-            # try:
-            #     first_submitted_date = datetime.fromtimestamp(
-            #         first_submitted_ts
-            #     ).isoformat()
-            # # pylint: disable=broad-except
-            # except Exception:
-            #     first_submitted_date = None
-
-            # last_modification_ts = get_value(
-            #     "data.attributes.last_modification_date", vt_result, None
-            # )
-            # try:
-            #     last_modification_date = datetime.fromtimestamp(
-            #         last_modification_ts
-            #     ).isoformat()
-            # # pylint: disable=broad-except
-            # except Exception:
-            #     last_modification_date = None
-
-        else:
-            # 404 not found
+        if not isinstance(vt_result, dict) or "data" not in vt_result:
+            # 404, an error, or something that is not a report at all.
             result["status"] = "not_found"
+            return result
+
+        result["status"] = "found"
+        result["response_code"] = 200
+        result["extra_data"]["record"] = get_value("data.attributes", vt_result, {})
+
+        # VirusTotal reports one string of comma separated categories per feed vendor.
+        vt_cats = get_value("data.attributes.categories", vt_result, {})
+        if isinstance(vt_cats, dict):
+            for value in vt_cats.values():
+                if isinstance(value, str):
+                    result["categories"].extend(
+                        [part.strip() for part in value.split(",") if part.strip()]
+                    )
 
         return result
 
-    def get_remaining_quota(self):
-        """Returns the number of hashes that could be queried within this run"""
-        url = f"https://www.virustotal.com/api/v3/users/{self.api_key}/overall_quotas"
-        headers = {"Accept": "application/json", "x-apikey": self.api_key}
+    def request(self, path):
+        """GET one VirusTotal API path. Returns the response, or None when it could not be made."""
+        try:
+            return requests.get(
+                f"{API_URL}{path}",
+                headers={"Accept": "application/json", "x-apikey": self.api_key},
+                timeout=HTTP_TIMEOUT,
+            )
+        except requests.RequestException as error:
+            # Never log the URL of the quota endpoint: it carries the API key in its path.
+            self.logger.error("could not reach VirusTotal: %s", error)
+            return None
 
-        # Get the quotas, if response code != 200, return 0 so we don't query further
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            json_response = response.json()
-        else:
+    def get_remaining_quota(self):
+        """How many lookups this account may still make. 0 when that cannot be established."""
+        # The overall_quotas endpoint accepts the API key itself as the user id.
+        response = self.request(f"/users/{self.api_key}/overall_quotas")
+        if response is None:
+            return 0
+
+        if response.status_code != 200:
             self.logger.warning(
                 "Error retrieving VT Quota (HTTP Status code: %d)", response.status_code
             )
             return 0
 
-        # Extract the hourly, daily and monthly remaining quotas
-        remaining_hourly = get_value(
-            "data.api_requests_hourly.user.allowed", json_response, 0
-        ) - get_value("data.api_requests_hourly.user.used", json_response, 0)
-        remaining_daily = get_value(
-            "data.api_requests_daily.user.allowed", json_response, 0
-        ) - get_value("data.api_requests_daily.user.used", json_response, 0)
-        remaining_monthly = get_value(
-            "data.api_requests_monthly.user.allowed", json_response, 0
-        ) - get_value("data.api_requests_monthly.user.used", json_response, 0)
+        try:
+            json_response = response.json()
+        except ValueError:
+            self.logger.warning("VirusTotal returned a non-JSON quota response")
+            return 0
 
-        self.logger.debug(
-            "Remaining quotas: hourly(%d) / daily(%d) / monthly(%d)",
-            remaining_hourly,
-            remaining_daily,
-            remaining_monthly,
-        )
+        remaining = []
+        for window in ("hourly", "daily", "monthly"):
+            allowed = get_value(f"data.api_requests_{window}.user.allowed", json_response, 0)
+            used = get_value(f"data.api_requests_{window}.user.used", json_response, 0)
+            try:
+                remaining.append(int(allowed) - int(used))
+            except (TypeError, ValueError):
+                continue
 
-        # Get the smallest one and return it
-        remaining_min = min(remaining_hourly, remaining_daily, remaining_monthly)
+        if not remaining:
+            return 0
 
-        return remaining_min
+        self.logger.debug("Remaining quotas (hourly/daily/monthly): %s", remaining)
+        return min(remaining)
 
     def get_vt_domain_results(self, domain):
-        """Queries VT API with domain and returns the results or None if error / nothing found"""
+        """The VirusTotal report for a domain, or None when there is none."""
+        response = self.request(f"/domains/{domain}")
+        if response is None:
+            return None
 
-        url = f"https://www.virustotal.com/api/v3/domains/{domain}"
-        headers = {"Accept": "application/json", "x-apikey": self.api_key}
+        if response.status_code == 404:  # Domain not found
+            return None
 
-        # Get the quotas, if response code != 200, return 0 so we don't query further
-        response = requests.get(url, headers=headers)
-
-        if response.status_code == 200:  # Domain found
-            json_response = response.json()
-        elif response.status_code == 404:  # Domain not found
-            json_response = None
-        else:  # Unexpected result
+        if response.status_code != 200:  # Unexpected result
             self.logger.warning(
-                "Error retrieving VT domain results (HTTP Status code: %d): %s",
-                response.status_code,
-                response.text,
+                "Error retrieving VT domain results (HTTP Status code: %d)", response.status_code
             )
-            json_response = None
+            if response.status_code == 429:
+                # Out of quota; stop asking for the rest of this run.
+                self.remaining_quota = 0
+            return None
 
-        return json_response
+        try:
+            return response.json()
+        except ValueError:
+            self.logger.warning("VirusTotal returned a non-JSON body for %s", domain)
+            return None

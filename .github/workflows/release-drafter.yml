@@ -1,20 +1,30 @@
 name: Release Drafter
 
+# 'develop' is where work lands; 'master' is what gets tagged. Both feed the same draft so the
+# notes are already complete when a release branch is cut.
 on:
   push:
-    # branches to consider in the event; optional, defaults to all
     branches:
-      - main
       - master
-      - maindev
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   update_release_draft:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # the draft release is written through the releases API
+      pull-requests: read
     steps:
-      - uses: release-drafter/release-drafter@v5
+      - uses: release-drafter/release-drafter@v7
         with:
-          # (Optional) specify config name to use, relative to .github/. Default: release-drafter.yml
           config-name: release-drafter.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

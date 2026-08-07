@@ -1,7 +1,14 @@
 name: Molecule
 
+# Ansible is the optional remote-execution wrapper around redelkctl, so this only runs when the
+# ansible/ tree changes. The Python, Validate and Docker images workflows carry every pull request.
 on:
   push:
+    branches:
+      - master
+      - develop
+      - "feat/**"
+      - "fix/**"
     paths:
       - "ansible/**"
       - ".github/workflows/molecule.yml"
@@ -9,8 +16,49 @@ on:
     paths:
       - "ansible/**"
       - ".github/workflows/molecule.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
+  lint:
+    name: ansible-lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-lint
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "ansible-core==2.20.4" "ansible-lint==26.6.0"
+
+      # ansible-lint resolves every module it sees, so ansible.posix has to be present or the
+      # synchronize tasks fail as "unknown-module".
+      - name: Install Ansible collections
+        working-directory: ansible
+        run: |
+          mkdir -p .ansible/collections
+          ansible-galaxy collection install -r collections.yml -p .ansible/collections
+
+      # --offline: the roles pull no external content, so a galaxy fetch during the lint itself
+      # would only add a network dependency.
+      - name: Run ansible-lint
+        working-directory: ansible
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible/.ansible/collections
+        run: ansible-lint --offline
+
   molecule:
     name: Molecule (${{ matrix.scenario }})
     runs-on: ubuntu-24.04
@@ -27,7 +75,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6

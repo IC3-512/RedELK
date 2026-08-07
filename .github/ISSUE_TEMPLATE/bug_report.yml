@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in RedELK does not work
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Output of `./redelkctl doctor`, or at least the RedELK version, the host OS and which
+        C2 frameworks and redirectors are configured.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        `./redelkctl logs <service>` for the failing container, or the output of the command that
+        failed. Remove hostnames, IP addresses and credentials first.
+      render: shell
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed operational data (customer IPs, domains, implant names) from this report
+          required: true

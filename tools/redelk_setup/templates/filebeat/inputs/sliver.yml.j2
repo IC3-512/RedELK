@@ -1,0 +1,26 @@
+{{ header }}
+# Sliver teamserver audit log (newline delimited JSON).
+
+{% set base = base_path or '/root/.sliver' %}
+
+- type: filestream
+  id: sliver-audit
+  enabled: true
+  paths:
+    - {{ base }}/logs/audit.json
+  prospector.scanner.check_interval: 5s
+  parsers:
+    - ndjson:
+        target: ""
+        add_error_key: true
+        overwrite_keys: false
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: sliver
+      log:
+        type: events

@@ -12,6 +12,19 @@
       ansible.builtin.assert:
         that:
           - "'Docker version' in docker_version.stdout"
+        quiet: true
+
+    # redelkctl refuses to install without Compose v2, so the plugin matters as much as the engine.
+    - name: Check docker compose is the v2 plugin
+      ansible.builtin.command: docker compose version
+      register: docker_compose_version
+      changed_when: false
+
+    - name: Assert docker compose v2 is available
+      ansible.builtin.assert:
+        that:
+          - "'Docker Compose version' in docker_compose_version.stdout"
+        quiet: true
 
     - name: Gather service facts
       ansible.builtin.service_facts:
@@ -21,3 +34,4 @@
         that:
           - "'docker.service' in ansible_facts.services"
           - ansible_facts.services['docker.service'].state == 'running'
+        quiet: true

@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""
+RedELK deployment tool.
+
+This is the only script you need to run. It bootstraps its own virtualenv on first use so that a
+fresh Debian/Ubuntu box needs nothing beyond python3 and docker.
+
+    ./redelkctl init        create redelk.yml
+    ./redelkctl validate    check it
+    ./redelkctl install     deploy the RedELK server
+    ./redelkctl package     build the redirector / C2 server packages
+    ./redelkctl doctor      check that everything works
+
+Authors:
+- RedELK contributors
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+TOOLS = ROOT / "tools"
+VENV = ROOT / ".redelk-venv"
+REQUIREMENTS = TOOLS / "requirements.txt"
+MIN_PYTHON = (3, 10)
+
+
+def venv_python() -> Path:
+    return VENV / ("Scripts" if os.name == "nt" else "bin") / "python"
+
+
+# Minimum versions redelkctl needs, checked as well as the import itself. Ubuntu 24.04 ships
+# python3-cryptography 41.0.7 and Debian 12 an older Jinja2: both import fine and then fail deep
+# inside a run, which is a far worse experience than bootstrapping a virtualenv up front.
+MIN_VERSIONS = {"cryptography": (41, 0), "jinja2": (3, 1), "yaml": (6, 0)}
+
+
+def _version_tuple(raw: str) -> tuple:
+    parts = []
+    for piece in str(raw).split(".")[:2]:
+        digits = "".join(c for c in piece if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def dependencies_available() -> bool:
+    """True when every dependency is importable *and* new enough."""
+    import importlib
+
+    for name, minimum in MIN_VERSIONS.items():
+        try:
+            module = importlib.import_module(name)
+        except ImportError:
+            return False
+        version = getattr(module, "__version__", None)
+        if version is None:
+            continue  # cannot tell; assume the import is good enough
+        if _version_tuple(version) < minimum:
+            print(
+                f"[!] {name} {version} is older than the required "
+                f"{'.'.join(str(p) for p in minimum)}"
+            )
+            return False
+    return True
+
+
+def bootstrap() -> None:
+    """Create .redelk-venv, install the dependencies, and re-exec inside it."""
+    python = venv_python()
+    if not python.is_file():
+        print(f"[*] Creating a virtualenv for redelkctl in {VENV}")
+        try:
+            import venv
+
+            venv.EnvBuilder(with_pip=True, clear=False).create(VENV)
+        except Exception as error:  # pylint: disable=broad-except
+            sys.exit(
+                f"[X] Could not create a virtualenv: {error}\n"
+                "    On Debian/Ubuntu install it with: apt-get install -y python3-venv\n"
+                "    Or install the dependencies yourself: pip install -r tools/requirements.txt"
+            )
+
+    print("[*] Installing redelkctl dependencies")
+    result = subprocess.run(
+        [str(python), "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    result = subprocess.run(
+        [str(python), "-m", "pip", "install", "--quiet", "-r", str(REQUIREMENTS)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        sys.exit(
+            f"[X] Could not install the dependencies:\n{result.stdout}{result.stderr}\n"
+            "    If this host has no internet access, install them from your distribution:\n"
+            "    apt-get install -y python3-yaml python3-jinja2 python3-cryptography"
+        )
+
+    os.environ["REDELKCTL_BOOTSTRAPPED"] = "1"
+    os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+def main() -> int:
+    if sys.version_info < MIN_PYTHON:
+        sys.exit(
+            f"[X] redelkctl needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer "
+            f"(found {sys.version.split()[0]})"
+        )
+
+    sys.path.insert(0, str(TOOLS))
+
+    if not dependencies_available():
+        if os.environ.get("REDELKCTL_BOOTSTRAPPED"):
+            sys.exit(
+                "[X] The dependencies are still missing after bootstrapping. "
+                "Install them manually: pip install -r tools/requirements.txt"
+            )
+        bootstrap()  # never returns
+
+    from redelk_setup.cli import main as cli_main
+
+    return cli_main()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

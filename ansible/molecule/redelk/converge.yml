@@ -1,18 +1,4 @@
 ---
-- name: Converge ELK servers
-  hosts: elkservers
-  gather_facts: true
-  roles:
-    - redelk-server
-
-- name: Converge C2 servers
-  hosts: c2servers
-  gather_facts: true
-  roles:
-    - redelk-client
-
-- name: Converge redirectors
-  hosts: redirs
-  gather_facts: true
-  roles:
-    - redelk-client
+# Run the playbook operators run, rather than a molecule-only copy of it that can drift.
+- name: Converge
+  ansible.builtin.import_playbook: ../../playbook.yml

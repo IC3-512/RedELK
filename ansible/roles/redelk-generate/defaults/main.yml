@@ -1,0 +1,16 @@
+---
+# The RedELK repository on the control node: the directory holding redelk.yml and ./redelkctl.
+redelk_repo_path: "{{ playbook_dir | dirname }}"
+
+# The configuration file redelkctl reads, relative to redelk_repo_path.
+redelk_config_file: redelk.yml
+
+# Where './redelkctl generate' writes the per-host installation packages.
+redelk_packages_path: "{{ redelk_repo_path }}/build/packages"
+
+# Run redelkctl, or only check that its output is there. Set to false to deploy exactly what is in
+# build/packages/ today, for example when redelk.yml lives on another workstation.
+redelk_generate: true
+
+# The package a shipper host expects, under redelk_packages_path.
+redelk_package_name: "{{ inventory_hostname }}"

@@ -6,16 +6,25 @@
 # Author: Outflank B.V. / Marc Smeets
 #
 
+# The screenshots live in a 'screenshots' subdirectory next to the screenshots.log we are reading.
+# Anchoring on '/cobaltstrike' matches what getremotelogs.sh reproduces under /c2logs/<agent name>/;
+# splitting on '/cobaltstrike/server' and re-prefixing '/cobaltstrike' used to drop the '/server'
+# directory, so on a 4.x teamserver every screenshot link 404'd.
 def filter(event)
   host = event.get("[agent][name]")
   logpath = event.get("[log][file][path]")
   filename = event.get("[screenshot][file_name]")
-  temppath = logpath.split('/cobaltstrike/server')
-  temppath2 = temppath[1].split(/\/([^\/]*)$/)
-  screenshoturl = "/c2logs/" + "#{host}" + "/cobaltstrike" + "#{temppath2[0]}" + "/screenshots/"+ "#{filename}"
-  thumburl = "/c2logs/" + "#{host}" + "/cobaltstrike" + "#{temppath2[0]}" + "/screenshots/"+ "#{filename}" + ".thumb.jpg"
+  index = logpath.nil? ? nil : logpath.rindex("/cobaltstrike")
+
+  if host.nil? || filename.nil? || index.nil?
+    event.tag("_rubyparsefailure")
+    return [event]
+  end
+
+  logdir = File.dirname(logpath[index..-1])
+  screenshoturl = "/c2logs/" + "#{host}" + "#{logdir}" + "/screenshots/" + "#{filename}"
   event.tag("_rubyparseok")
   event.set("[screenshot][full]", screenshoturl)
-  event.set("[screenshot][thumb]", thumburl)
+  event.set("[screenshot][thumb]", screenshoturl + ".thumb.jpg")
   return [event]
 end

@@ -5,14 +5,23 @@
 # Author: Outflank B.V. / Marc Smeets
 #
 
+# downloads.log holds the teamserver-local path of the harvested blob, e.g.
+# /root/cobaltstrike/server/downloads/2914cdfa8. On disk the file is stored as <blob id>_<name>.
+# Anchoring on '/cobaltstrike' keeps the '/server' part that a 4.x teamserver has and that
+# getremotelogs.sh reproduces under /c2logs/<agent name>/.
 def filter(event)
 	host = event.get("[agent][name]")
-  	filename = event.get("[file][name]")
+	filename = event.get("[file][name]")
 	file_path = event.get("[file][directory_local]")
-	file_patharray = file_path.split(/\/([^\/]*)$/)
-	file_id = file_patharray[-1]
-	downloadsurl = "/c2logs/" + "#{host}" + "/cobaltstrike/downloads/" + "#{file_id}" + "_" + "#{filename}"
+	index = file_path.nil? ? nil : file_path.rindex("/cobaltstrike")
+
+	if host.nil? || filename.nil? || index.nil?
+		event.tag("_rubyparsefailure")
+		return [event]
+	end
+
+	downloadsurl = "/c2logs/" + "#{host}" + file_path[index..-1] + "_" + "#{filename}"
 	event.tag("_rubyparseok")
-  	event.set("[file][url]", downloadsurl)
+	event.set("[file][url]", downloadsurl)
 	return [event]
 end

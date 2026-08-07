@@ -1,57 +1,50 @@
-Docker Role
-===========
+# docker
 
-Installs Docker Engine on Ubuntu by following Docker's official apt repository installation flow:
-https://docs.docker.com/engine/install/ubuntu/
+Installs Docker Engine from Docker's own apt repository, following
+<https://docs.docker.com/engine/install/>.
 
-Features
---------
+RedELK needs Docker on one host only: the RedELK server. Redirectors and C2 servers run filebeat,
+not containers.
 
-- Removes conflicting distro Docker packages.
-- Installs Docker prerequisites (`ca-certificates`, `curl`).
-- Installs Docker's apt signing key to `/etc/apt/keyrings/docker.asc`.
-- Configures Docker apt repo using deb822 source file (`/etc/apt/sources.list.d/docker.sources`).
-- Installs `docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, and `docker-compose-plugin`.
-- Ensures Docker service is enabled and running.
-- Supports Ubuntu `jammy` (22.04), `noble` (24.04), `questing` (25.10), and `resolute` (26.04) as current Docker-documented releases.
-- Keeps legacy support for Ubuntu `focal` (20.04 EOL).
+## What it does
 
-Requirements
-------------
+- Removes the conflicting distribution packages (`docker.io`, `containerd`, ...).
+- Installs Docker's signing key in `/etc/apt/keyrings/docker.asc` and the repository as a deb822
+  source (`/etc/apt/sources.list.d/docker.sources`).
+- Installs `docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin` and
+  `docker-compose-plugin` - redelkctl requires Compose v2, not the old `docker-compose` script.
+- Enables and starts the service.
 
-- Ubuntu host.
-- `become: true` for package and service management tasks.
-- A working Ubuntu apt configuration (including EOL mirror handling when applicable).
+## Supported platforms
 
-Configuration
--------------
+| Distribution | Releases |
+| --- | --- |
+| Ubuntu | `focal` (EOL, still installable), `jammy`, `noble`, `questing`, `resolute` |
+| Debian | `bullseye`, `bookworm`, `trixie` |
 
-This role intentionally exposes no user-tunable variables for Docker packages,
-repository settings, or service state. Values are hardcoded to keep behavior
-consistent across hosts. The role derives apt architecture from system facts
-(for example, `x86_64` -> `amd64`, `aarch64` -> `arm64`).
+The list lives in `vars/main.yml`. Anything else fails the first assertion with an explanation
+rather than half-installing: install Docker yourself and run the playbook with
+`redelk_install_docker=false`.
 
-Example Playbook
-----------------
+The only release-specific input is the apt suite, taken from `ansible_distribution_release`, and
+the only distribution-specific input is the repository URL
+(`https://download.docker.com/linux/<ubuntu|debian>`). The apt architecture is derived from the
+system facts (`x86_64` -> `amd64`, `aarch64` -> `arm64`, ...).
+
+## Requirements
+
+- `become: true`.
+- Working base apt sources on the host. This role does not manage them, which matters on EOL
+  releases such as `focal`.
+
+## Example
 
 ```yaml
-- hosts: docker_hosts
+- hosts: elkservers
   become: true
   roles:
     - role: docker
 ```
 
-Ubuntu 20.04 (EOL)
-------------------
-
-This role still installs Docker for `focal`, but it does not manage base Ubuntu
-apt mirrors. Operators must ensure host apt sources are already configured
-correctly before running this role.
-
-Ubuntu Version Logic
---------------------
-
-Docker's current Ubuntu installation steps are the same across supported Ubuntu
-versions. The only release-specific input is the apt suite/codename, which this
-role sets from `ansible_distribution_release` when configuring
-`download.docker.com`.
+Tested by `molecule/docker`, which converges the role in an Ubuntu container and a Debian
+container.

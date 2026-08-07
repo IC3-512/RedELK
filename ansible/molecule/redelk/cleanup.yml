@@ -1,13 +1,15 @@
 ---
-- name: Cleanup Molecule fixture archives
+# The throwaway repository holds a generated CA, its private key and redelk.secrets.yml. Remove it
+# as soon as the scenario is done rather than leaving key material in a temporary directory.
+- name: Remove the throwaway RedELK repository
   hosts: localhost
+  connection: local
   gather_facts: false
   become: false
   vars:
     ansible_become: false
-    fixtures_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/fixtures"
   tasks:
-    - name: Remove fixture directory
+    - name: Remove the throwaway repository
       ansible.builtin.file:
-        path: "{{ fixtures_dir }}"
+        path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/repo"
         state: absent

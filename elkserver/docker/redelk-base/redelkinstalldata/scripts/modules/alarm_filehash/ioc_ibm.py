@@ -3,135 +3,183 @@
 """
 Part of RedELK
 
-This check queries IBM X-Force API given a list of md5 hashes.
+This check queries the IBM X-Force Exchange API given a list of md5 hashes.
+
+IBM has withdrawn free-tier API access to X-Force Exchange and the product is end of life, so
+this provider is opt-in: it is only queried when `ibm_basic_auth` is set in redelk.yml. The
+endpoint still answers (401 without credentials), so the code is kept for the installations that
+hold a commercial subscription - it simply stays out of the way for everyone else.
+
+`ibm_basic_auth` is the complete Authorization header value, i.e. "Basic <base64 of key:password>".
+
+Fixes over v2:
+  * first_submitted was read out of `ibm_results` - the dictionary being built - instead of
+    `ibm_result`, so it was always None;
+  * without credentials the module still sent every hash to IBM with an empty Authorization
+    header, wasting a request per hash per run to collect a 401;
+  * no request had a timeout, and a network error propagated out of the whole alarm.
+
+Rate limiting: the paid tier is sold in packs of 10,000 records per month.
 
 Authors:
 - Outflank B.V. / Mark Bergman (@xychix)
 - Lorenzo Bernardi (@fastlorenzo)
+- RedELK contributors
 """
+
+import datetime
 import logging
-from datetime import datetime
 
 import requests
-from modules.helpers import get_value
+from modules.helpers import HTTP_TIMEOUT, get_value
+
+API_ROOT = "https://api.xforce.ibmcloud.com"
+
+# Used when the usage endpoint cannot be read: a subscription that does not expose
+# /all-subscriptions/usage should not disable hash checking altogether.
+DEFAULT_BUDGET = 10
+
+RESULT_ALARM = "newAlarm"
+RESULT_CLEAN = "clean"
+RESULT_QUOTA = "skipped, quota reached"
+RESULT_ERROR = "error"
 
 
-# Rate limiting:
-# Free Tier (Non-Commercial Use Only): The free tier allows usage of up to 5,000 records per month
-# Commercial API - Paid Tier (Commercial Use): Usage is priced by the number of data records that you access, which are sold in packs of 10,000 records per month
 class IBM:
     """This check queries IBM X-Force API given a list of md5 hashes."""
 
     def __init__(self, basic_auth):
-        # self.report = {}
-        # self.report['source'] = 'IBM X-Force'
         self.logger = logging.getLogger("alarm_filehash.ioc_ibm")
-        self.basic_auth = basic_auth
+        self.basic_auth = basic_auth or ""
+        self.enabled = bool(self.basic_auth)
+
+    @property
+    def _headers(self):
+        return {
+            "Accept": "application/json",
+            "Authorization": self.basic_auth,
+            "User-Agent": "RedELK",
+        }
 
     def get_remaining_quota(self):
         """Returns the number of hashes that could be queried within this run"""
-        url = "https://api.xforce.ibmcloud.com/all-subscriptions/usage"
-        headers = {"Accept": "application/json", "Authorization": self.basic_auth}
+        url = f"{API_ROOT}/all-subscriptions/usage"
 
-        # Get the quotas, if response code != 200, return 0 so we don't query further
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            json_response = response.json()
-        else:
+        try:
+            response = requests.get(url, headers=self._headers, timeout=HTTP_TIMEOUT)
+        except requests.RequestException as error:
             self.logger.warning(
-                "Error retrieving IBM X-Force Quota (HTTP Status code: %d)",
-                response.status_code,
+                "could not reach IBM X-Force to read the quota (%s); allowing %d lookup(s) this run",
+                error,
+                DEFAULT_BUDGET,
             )
-            return 0
+            return DEFAULT_BUDGET
+
+        if response.status_code != 200:
+            self.logger.warning(
+                "could not read the IBM X-Force quota (HTTP status code: %d); allowing %d "
+                "lookup(s) this run",
+                response.status_code,
+                DEFAULT_BUDGET,
+            )
+            return DEFAULT_BUDGET
+
+        try:
+            json_response = response.json()
+        except ValueError:
+            self.logger.warning("IBM X-Force returned a non-JSON usage response")
+            return DEFAULT_BUDGET
+
+        if not isinstance(json_response, list):
+            return DEFAULT_BUDGET
 
         remaining_quota = 0
+        cycle_now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m")
 
-        # Extract the hourly, daily and monthly remaining quotas
         for result in json_response:
             # Only take the relevant results (usageData for 'api' type)
-            if (
-                "subscriptionType" in result
-                and result["subscriptionType"] == "api"
-                and "usageData" in result
-            ):
-                # Get the monthly quota (limit)
-                entitlement = get_value("usageData.entitlement", result, 0)
-                remaining_quota += int(entitlement)
+            if not isinstance(result, dict) or result.get("subscriptionType") != "api":
+                continue
+            try:
+                remaining_quota += int(get_value("usageData.entitlement", result, 0))
+                for usage_cycle in get_value("usageData.usage", result, []) or []:
+                    if get_value("cycle", usage_cycle, 0) == cycle_now:
+                        remaining_quota -= int(get_value("usage", usage_cycle, 0))
+            except (TypeError, ValueError):
+                self.logger.warning("unexpected IBM X-Force usage format; skipping a subscription")
 
-                # Get the usage array (per cycle)
-                usage = get_value("usageData.usage", result, [])
-
-                # Find the current cycle and remove the current usage from that cycle from the remaining quota
-                for usage_cycle in usage:
-                    cycle = get_value("cycle", usage_cycle, 0)
-                    if cycle == datetime.now().strftime("%Y-%m"):
-                        current_usage = get_value("usage", usage_cycle, 0)
-                        remaining_quota -= int(current_usage)
-
-        self.logger.debug("Remaining quota (monthly): %d", remaining_quota)
-
-        return remaining_quota
+        self.logger.debug("remaining IBM X-Force quota (monthly): %d", remaining_quota)
+        return max(0, remaining_quota)
 
     def get_ibm_xforce_file_results(self, file_hash):
-        """Queries VT API with file hash and returns the results or None if error / nothing found"""
+        """Look one hash up. Returns (status, payload) with status in found/notfound/quota/error."""
+        url = f"{API_ROOT}/malware/{file_hash}"
 
-        url = f"https://api.xforce.ibmcloud.com/malware/{file_hash}"
-        headers = {"Authorization": self.basic_auth}
+        try:
+            response = requests.get(url, headers=self._headers, timeout=HTTP_TIMEOUT)
+        except requests.RequestException as error:
+            self.logger.warning("could not reach IBM X-Force: %s", error)
+            return "error", None
 
-        # Get the quotas, if response code != 200, return 0 so we don't query further
-        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            try:
+                return "found", response.json()
+            except ValueError:
+                self.logger.warning("IBM X-Force returned a non-JSON result for a file hash")
+                return "error", None
+        if response.status_code == 404:  # Hash not found
+            return "notfound", None
+        if response.status_code == 429:
+            return "quota", None
 
-        if response.status_code == 200:  # Hash found
-            json_response = response.json()
-        elif response.status_code == 404:  # Hash not found
-            json_response = None
-        else:  # Unexpected result
-            self.logger.warning(
-                "Error retrieving IBM X-Force File hash results (HTTP Status code: %d): %s",
-                response.status_code,
-                response.text,
-            )
-            # json_response = response.text
-            json_response = None
+        self.logger.warning(
+            "error retrieving IBM X-Force file hash results (HTTP status code: %d)",
+            response.status_code,
+        )
+        return "error", None
 
-        return json_response
+    def _summarise(self, payload, md5):
+        """The part of an X-Force record worth storing on the document."""
+        risk = get_value("malware.risk", payload)
+        family = get_value("malware.family", payload, []) or []
+        return {
+            "result": RESULT_ALARM,
+            "first_submitted": get_value("malware.created", payload),
+            "risk": risk,
+            "family": family if isinstance(family, list) else [family],
+            "link": f"https://exchange.xforce.ibmcloud.com/malware/{md5}",
+        }
 
     def test(self, hash_list):
         """run the query and build the report (results)"""
-        self.logger.debug("Checking IOCs on IBM X-Force: %s", hash_list)
+        if not self.enabled:
+            # Not a warning: no free tier exists any more, so having no credentials is the normal
+            # case rather than a misconfiguration.
+            self.logger.info("no IBM X-Force credentials configured, skipping")
+            return {}
 
-        # Get the remaining quota for this run
         remaining_quota = self.get_remaining_quota()
+        self.logger.debug("checking %d hash(es), budget %d", len(hash_list), remaining_quota)
 
         ibm_results = {}
-        # Query VT API for file hashes
-        count = 0
         for md5 in hash_list:
-            if count < remaining_quota:
-                # Within quota, let's check the file hash with VT
-                ibm_result = self.get_ibm_xforce_file_results(md5)
+            if remaining_quota <= 0:
+                ibm_results[md5] = {"result": RESULT_QUOTA}
+                continue
 
-                if ibm_result is not None:
-                    if isinstance(ibm_result, type({})) and "malware" in ibm_result:
-                        # Get first submission date
-                        first_submitted_date = get_value(
-                            "malware.created", ibm_results, None
-                        )
+            status, payload = self.get_ibm_xforce_file_results(md5)
+            remaining_quota -= 1
 
-                        # Found and marked as malware
-                        ibm_results[md5] = {
-                            "record": ibm_result,
-                            "result": "newAlarm",
-                            "first_submitted": first_submitted_date,
-                        }
-                    else:
-                        ibm_results[md5] = {"result": "clean"}
-                else:
-                    # 404 not found
-                    ibm_results[md5] = {"result": "clean"}
+            if status == "quota":
+                self.logger.warning("IBM X-Force quota reached, skipping the remaining hashes")
+                remaining_quota = 0
+                ibm_results[md5] = {"result": RESULT_QUOTA}
+            elif status == "found" and isinstance(payload, dict) and "malware" in payload:
+                ibm_results[md5] = self._summarise(payload, md5)
+            elif status in ("found", "notfound"):
+                # 200 without a malware record means X-Force knows the hash but has nothing on it.
+                ibm_results[md5] = {"result": RESULT_CLEAN}
             else:
-                # Quota reached, skip the check
-                ibm_results[md5] = {"result": "skipped, quota reached"}
-            count += 1
+                ibm_results[md5] = {"result": RESULT_ERROR}
 
         return ibm_results

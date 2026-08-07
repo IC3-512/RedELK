@@ -1,36 +1,59 @@
 #
 # Part of RedELK
-# Dockerfile for RedELK base image
+#
+# The RedELK base image: the scheduler that runs the alarm, enrichment and C2 connector modules,
+# provisions Elasticsearch and Kibana, and pulls artefacts off the C2 servers.
+#
+# It used to be built on phusion/baseimage:18.04 (Ubuntu 18.04, Python 3.6, last built in 2020),
+# which is what pinned the Elasticsearch client - and therefore the whole stack - to 7.x.
 #
 # Authors:
 # - Outflank B.V. / Marc Smeets
-# - Lorenzo Bernardi
+# - Lorenzo Bernardi (@fastlorenzo)
+# - RedELK contributors
 #
 
-FROM phusion/baseimage:18.04-1.0.0
-LABEL maintainer="Outflank B.V. / Marc Smeets"
-LABEL description="RedELK Base"
+FROM python:3.13-slim-bookworm
 
-# Install required packages
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get -y install rsync python3-pil python3-pip python3-setuptools && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+LABEL org.opencontainers.image.title="RedELK Base"
+LABEL org.opencontainers.image.description="RedELK alarm, enrichment and C2 connector runtime"
+LABEL org.opencontainers.image.source="https://github.com/outflanknl/RedELK"
 
-# Copy relevant install data
-RUN mkdir -p /root/redelkinstalldata/
-COPY ./redelkinstalldata/ /root/redelkinstalldata/
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    REDELK_HOME=/usr/share/redelk
 
-# Init script
-RUN mkdir -p /etc/my_init.d && \
-    cp /root/redelkinstalldata/42_redelk-base-docker-init.sh /etc/my_init.d/42_redelk-base-docker-init.sh && \
-    chmod +x /etc/my_init.d/42_redelk-base-docker-init.sh
+# cron runs the scheduler; rsync + openssh-client pull C2 artefacts; tini reaps the processes
+# cron leaves behind.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cron \
+        openssh-client \
+        rsync \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
 
-# copy relevant scripts to redelk script working dir
-RUN mkdir -p /usr/share/redelk/bin && \
-    cp -r /root/redelkinstalldata/scripts/* /usr/share/redelk/bin/ && \
-    chmod -R 775 /usr/share/redelk/bin/*
+RUN useradd --create-home --uid 1000 --shell /bin/sh redelk \
+    && mkdir -p /var/log/redelk /var/www/html/c2logs /var/lib/redelk /etc/redelk \
+    && chown -R redelk:redelk /var/log/redelk /var/www/html/c2logs /var/lib/redelk
 
-# Install python requirements
-RUN pip3 install -r /usr/share/redelk/bin/requirements.txt
+COPY ./redelkinstalldata/scripts/requirements.txt ${REDELK_HOME}/bin/requirements.txt
+RUN pip install --no-cache-dir -r ${REDELK_HOME}/bin/requirements.txt
 
-CMD ["/sbin/my_init"]
+COPY --chown=redelk:redelk ./redelkinstalldata/scripts/ ${REDELK_HOME}/bin/
+COPY --chown=redelk:redelk ./redelkinstalldata/templates/ /opt/redelk/templates/
+COPY --chown=redelk:redelk ./redelkinstalldata/kibana/ /opt/redelk/kibana/
+COPY --chown=redelk:redelk ./redelkinstalldata/data/ /opt/redelk/data/
+
+RUN chmod -R 0755 ${REDELK_HOME}/bin
+
+WORKDIR ${REDELK_HOME}/bin
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=20 \
+    CMD test -f /var/lib/redelk/es-provisioned || exit 1
+
+# tini as PID 1 so cron's children are reaped and SIGTERM reaches the container cleanly.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python3", "/usr/share/redelk/bin/entrypoint.py"]

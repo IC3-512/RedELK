@@ -1,5 +1,0 @@
----
-- name: Prepare Docker role test hosts
-  hosts: docker_hosts
-  gather_facts: false
-  tasks: []

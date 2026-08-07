@@ -1,0 +1,35 @@
+{
+  "index_patterns": [
+    "redelk-domainslist-*"
+  ],
+  "priority": 300,
+  "composed_of": [
+    "redelk-lists"
+  ],
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "redelk",
+      "index.number_of_shards": 1,
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "5s",
+      "index.mapping.total_fields.limit": 10000
+    },
+    "mappings": {
+      "dynamic": true,
+      "date_detection": false,
+      "numeric_detection": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "managed_by": "redelk",
+    "description": "Known-infrastructure domain lists: one index per list (redelk-domainslist-redteam). Documents are written by modules/enrich_syncdomainslists as {@timestamp, domainslist:{name, source, domain, comment}} and enriched in place by modules/enrich_domainscategorization. The priority is above the redelk-* template because a composable index template does not merge with a lower priority one, it replaces it.",
+    "authors": [
+      "Lorenzo Bernardi (@fastlorenzo)"
+    ]
+  }
+}

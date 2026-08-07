@@ -1,0 +1,49 @@
+{{ header }}
+# Redirector traffic logs for a {{ host.type }} redirector.
+#
+# The matching webserver configuration - which must produce the log format RedELK's Logstash
+# filters expect - is in {% if host.type == 'haproxy' %}example-data-and-configs/HAProxy/{% elif host.type == 'apache' %}example-data-and-configs/Apache/{% else %}example-data-and-configs/nginx/{% endif %}.
+
+{% if host.type == 'haproxy' %}
+- type: filestream
+  id: redir-haproxy
+  enabled: true
+  paths:
+    - /var/log/haproxy.log
+  prospector.scanner.check_interval: 5s
+  fields_under_root: true
+  fields:
+    infra:
+      log:
+        type: redirtraffic
+    redir:
+      program: haproxy
+{% elif host.type == 'apache' %}
+- type: filestream
+  id: redir-apache
+  enabled: true
+  paths:
+    - /var/log/apache2/access-redelk.log
+  prospector.scanner.check_interval: 5s
+  fields_under_root: true
+  fields:
+    infra:
+      log:
+        type: redirtraffic
+    redir:
+      program: apache
+{% elif host.type == 'nginx' %}
+- type: filestream
+  id: redir-nginx
+  enabled: true
+  paths:
+    - /var/log/nginx/access-redelk.log
+  prospector.scanner.check_interval: 5s
+  fields_under_root: true
+  fields:
+    infra:
+      log:
+        type: redirtraffic
+    redir:
+      program: nginx
+{% endif %}

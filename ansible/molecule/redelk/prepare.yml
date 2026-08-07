@@ -1,256 +1,87 @@
 ---
-- name: Build fixture archives for RedELK role tests
+- name: Build a throwaway RedELK repository for the scenario
   hosts: localhost
+  connection: local
   gather_facts: false
   become: false
   vars:
     ansible_become: false
-    project_dir: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}"
-    repo_root: "{{ project_dir | dirname }}"
-    fixtures_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/fixtures"
+    repo_root: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | dirname }}"
+    molecule_repo: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/repo"
   tasks:
-    - name: Reset fixture directory
+    - name: Reset the throwaway repository
       ansible.builtin.file:
-        path: "{{ fixtures_dir }}"
+        path: "{{ molecule_repo }}"
         state: absent
 
-    - name: Create fixture directory
+    - name: Create the throwaway repository
       ansible.builtin.file:
-        path: "{{ fixtures_dir }}"
+        path: "{{ molecule_repo }}"
         state: directory
-        mode: "0755"
+        mode: "0700"
 
-    - name: Copy fixture source directories from repository
-      ansible.builtin.command:
-        argv:
-          - cp
-          - -R
-          - "{{ repo_root }}/{{ item }}"
-          - "{{ fixtures_dir }}/{{ item }}"
-      changed_when: true
+    # Only what redelkctl needs, and none of the artefacts a developer's own './redelkctl generate'
+    # left behind - the scenario must start from the same state on a laptop and on a CI runner.
+    - name: Copy the repository
+      ansible.posix.synchronize:
+        src: "{{ repo_root }}/{{ item }}"
+        dest: "{{ molecule_repo }}/"
+        archive: true
+        rsync_opts:
+          - --exclude=.redelk-venv/
+          - --exclude=__pycache__/
+          - --exclude=*.pyc
+          - --exclude=elkserver/.env
+          - --exclude=elkserver/mounts/certs/
+          - --exclude=elkserver/mounts/certbot/
+          - --exclude=elkserver/mounts/nginx-certs/
+          - --exclude=elkserver/mounts/redelk-ssh/
+          - --exclude=elkserver/mounts/logstash-config/certs_inputs/
+          - --exclude=elkserver/mounts/logstash-config/certs_clients/
+          - --exclude=elkserver/mounts/redelk-config/etc/redelk/config.json
+          - --exclude=elkserver/mounts/redelk-config/etc/redelk/*.conf
+          - --exclude=elkserver/mounts/nginx-config/htpasswd.users.template
       loop:
+        - redelkctl
+        - VERSION
+        - tools
         - elkserver
         - c2servers
-        - redirs
 
-    - name: Ensure generated fixture directories exist
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        mode: "0755"
-      loop:
-        - "{{ fixtures_dir }}/certs"
-        - "{{ fixtures_dir }}/ssh"
-        - "{{ fixtures_dir }}/c2servers/filebeat"
-        - "{{ fixtures_dir }}/c2servers/ssh"
-        - "{{ fixtures_dir }}/redirs/filebeat"
-        - "{{ fixtures_dir }}/elkserver/mounts/redelk-ssh"
-        - "{{ fixtures_dir }}/elkserver/mounts/logstash-config/certs_inputs"
-
-    - name: Generate Molecule RedELK CA certificate
-      ansible.builtin.command:
-        argv:
-          - openssl
-          - req
-          - -x509
-          - -nodes
-          - -newkey
-          - rsa:2048
-          - -days
-          - "365"
-          - -keyout
-          - "{{ fixtures_dir }}/certs/redelkCA.key"
-          - -out
-          - "{{ fixtures_dir }}/certs/redelkCA.crt"
-          - -subj
-          - /CN=redelk-molecule-ca
-      args:
-        creates: "{{ fixtures_dir }}/certs/redelkCA.crt"
-
-    - name: Generate Molecule ELK server certificate
-      ansible.builtin.command:
-        argv:
-          - openssl
-          - req
-          - -x509
-          - -nodes
-          - -newkey
-          - rsa:2048
-          - -days
-          - "365"
-          - -keyout
-          - "{{ fixtures_dir }}/certs/elkserver.key"
-          - -out
-          - "{{ fixtures_dir }}/certs/elkserver.crt"
-          - -subj
-          - /CN=elkserver-01
-      args:
-        creates: "{{ fixtures_dir }}/certs/elkserver.crt"
-
-    - name: Copy ELK certificates into fixture package
+    - name: Install the scenario's redelk.yml
       ansible.builtin.copy:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        remote_src: true
-        mode: preserve
-      loop:
-        - src: "{{ fixtures_dir }}/certs/redelkCA.crt"
-          dest: "{{ fixtures_dir }}/c2servers/filebeat/redelkCA.crt"
-        - src: "{{ fixtures_dir }}/certs/redelkCA.crt"
-          dest: "{{ fixtures_dir }}/redirs/filebeat/redelkCA.crt"
-        - src: "{{ fixtures_dir }}/certs/redelkCA.crt"
-          dest: "{{ fixtures_dir }}/elkserver/mounts/logstash-config/certs_inputs/redelkCA.crt"
-        - src: "{{ fixtures_dir }}/certs/elkserver.crt"
-          dest: "{{ fixtures_dir }}/elkserver/mounts/logstash-config/certs_inputs/elkserver.crt"
-        - src: "{{ fixtures_dir }}/certs/elkserver.key"
-          dest: "{{ fixtures_dir }}/elkserver/mounts/logstash-config/certs_inputs/elkserver.key"
+        src: redelk.yml
+        dest: "{{ molecule_repo }}/redelk.yml"
+        mode: "0600"
 
-    - name: Generate Molecule sync SSH key pair
-      ansible.builtin.command:
-        argv:
-          - ssh-keygen
-          - -t
-          - rsa
-          - -f
-          - "{{ fixtures_dir }}/ssh/id_rsa"
-          - -N
-          - ""
-      args:
-        creates: "{{ fixtures_dir }}/ssh/id_rsa"
-
-    - name: Copy sync SSH keys into fixture packages
-      ansible.builtin.copy:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        remote_src: true
-        mode: preserve
-      loop:
-        - src: "{{ fixtures_dir }}/ssh/id_rsa.pub"
-          dest: "{{ fixtures_dir }}/c2servers/ssh/id_rsa.pub"
-        - src: "{{ fixtures_dir }}/ssh/id_rsa"
-          dest: "{{ fixtures_dir }}/elkserver/mounts/redelk-ssh/id_rsa"
-        - src: "{{ fixtures_dir }}/ssh/id_rsa.pub"
-          dest: "{{ fixtures_dir }}/elkserver/mounts/redelk-ssh/id_rsa.pub"
-
-    - name: Check whether VERSION exists in the repository
-      ansible.builtin.stat:
-        path: "{{ repo_root }}/VERSION"
-      register: redelk_version_file
-
-    - name: Copy VERSION into fixture packages
-      ansible.builtin.copy:
-        src: "{{ repo_root }}/VERSION"
-        dest: "{{ item }}"
-        remote_src: true
-        mode: preserve
-      when: redelk_version_file.stat.exists
-      loop:
-        - "{{ fixtures_dir }}/elkserver/VERSION"
-        - "{{ fixtures_dir }}/c2servers/VERSION"
-        - "{{ fixtures_dir }}/redirs/VERSION"
-
-    - name: Create fixture tarballs
-      ansible.builtin.command:
-        argv:
-          - tar
-          - -czf
-          - "{{ fixtures_dir }}/{{ item.dest }}"
-          - -C
-          - "{{ fixtures_dir }}"
-          - "{{ item.src }}"
-      changed_when: true
-      loop:
-        - src: elkserver
-          dest: elkserver.tgz
-        - src: c2servers
-          dest: c2servers.tgz
-        - src: redirs
-          dest: redirs.tgz
-
-- name: Prepare Molecule ELK server host
+- name: Prepare the RedELK server container
   hosts: elkservers
   gather_facts: true
   become: true
   tasks:
-    - name: Remove conflicting Docker packages
+    # With these present redelkctl skips its virtualenv bootstrap, which keeps the scenario off
+    # PyPI. The role installs rsync itself; installing it here as well keeps prepare honest about
+    # what the container needs before anything is copied to it.
+    - name: Install redelkctl's dependencies from the distribution
       ansible.builtin.apt:
         name:
-          - docker.io
-          - docker-compose
-          - docker-compose-v2
-          - docker-doc
-          - podman-docker
-          - containerd
-          - runc
-        state: absent
-
-    - name: Install Docker repository prerequisites
-      ansible.builtin.apt:
-        name:
-          - ca-certificates
-          - curl
-          - python3-debian
-        update_cache: true
+          - rsync
+          - python3-yaml
+          - python3-jinja2
+          - python3-cryptography
         state: present
-
-    - name: Ensure apt keyrings directory exists
-      ansible.builtin.file:
-        path: /etc/apt/keyrings
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Install Docker apt signing key
-      ansible.builtin.get_url:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        dest: /etc/apt/keyrings/docker.asc
-        owner: root
-        group: root
-        mode: "0644"
-
-    - name: Map system architecture to Docker apt architecture
-      ansible.builtin.set_fact:
-        docker_apt_arch: "{{ docker_arch_map.get(ansible_facts['architecture'], ansible_facts['architecture']) }}"
-      vars:
-        docker_arch_map:
-          x86_64: amd64
-          aarch64: arm64
-          armv7l: armhf
-          ppc64le: ppc64el
-
-    - name: Ensure architecture is supported by Docker apt repository
-      ansible.builtin.assert:
-        that:
-          - docker_apt_arch in ['amd64', 'arm64', 'armhf', 'ppc64el', 's390x']
-        fail_msg: >-
-          Unsupported architecture '{{ ansible_facts["architecture"] }}'
-          (mapped '{{ docker_apt_arch }}') for Docker apt repository.
-
-    - name: Configure Docker apt repository
-      ansible.builtin.deb822_repository:
-        name: docker
-        types:
-          - deb
-        uris:
-          - https://download.docker.com/linux/ubuntu
-        suites:
-          - "{{ ansible_facts['distribution_release'] }}"
-        components:
-          - stable
-        architectures:
-          - "{{ docker_apt_arch }}"
-        signed_by: /etc/apt/keyrings/docker.asc
-        state: present
-
-    - name: Update apt cache after adding Docker repository
-      ansible.builtin.apt:
         update_cache: true
 
-    - name: Install Docker CLI packages from official Docker repository
+- name: Prepare the shipper containers
+  hosts: c2servers:redirs
+  gather_facts: true
+  become: true
+  tasks:
+    # install.py apt-gets rush when it is missing, and the images ship with an empty apt cache.
+    - name: Install the restricted shell used by the C2 sync account
       ansible.builtin.apt:
         name:
-          - docker-ce-cli
-          - docker-buildx-plugin
-          - docker-compose-plugin
+          - rush
         state: present
+        update_cache: true
+      when: "'c2servers' in group_names"

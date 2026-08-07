@@ -6,16 +6,22 @@
 # Author: Outflank B.V. / Marc Smeets
 #
 
+# Same anchoring as cs_makebeaconlogpath.rb: keep everything from '/cobaltstrike' onwards, which
+# is exactly what getremotelogs.sh reproduces under /c2logs/<agent name>/. Splitting on
+# '/cobaltstrike/server' and then re-prefixing '/cobaltstrike' used to drop the '/server'
+# directory from the URL, so on a 4.x teamserver every keystrokes link 404'd.
 def filter(event)
 	host = event.get("[agent][name]")
 	logpath = event.get("[log][file][path]")
-	implant_id = event.get("[implant][id]")
-	desktop_session = event.get("[keystrokes][desktop_session]")
-	temppath = logpath.split('/cobaltstrike/server')
-	temppath2 = temppath[1].split(/\/([^\/]*)$/)
-	filename = temppath2[1]
-	keystrokespath = "/c2logs/" + "#{host}" + "/cobaltstrike" + "#{temppath2[0]}" + "/" + "#{filename}"
+	index = logpath.nil? ? nil : logpath.rindex("/cobaltstrike")
+
+	if host.nil? || index.nil?
+		event.tag("_rubyparsefailure")
+		return [event]
+	end
+
+	keystrokespath = "/c2logs/" + "#{host}" + logpath[index..-1]
 	event.tag("_rubyparseok")
-  	event.set("[keystrokes][url]", keystrokespath)
+	event.set("[keystrokes][url]", keystrokespath)
 	return [event]
 end

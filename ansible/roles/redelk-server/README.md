@@ -1,68 +1,71 @@
-RedELK Server Role
-==================
+# redelk-server
 
-Implements the public Ansible deployment path for the ELK-side RedELK server.
+Copies the RedELK repository to the server and runs `./redelkctl install` there.
 
-This role replaces `elkserver/install-elkserver.sh` for the Ansible path, while
-keeping the legacy script available for standalone/manual installs.
+The role renders nothing. Every file it puts on the server was produced by `./redelkctl generate`
+on the control node from `redelk.yml`, and `redelkctl install` on the server regenerates whatever
+is host specific before starting the stack.
 
-Scope
------
+## What it does
 
-This role is responsible for:
+1. Installs `rsync` and `python3-venv` (apt hosts only - other package managers get a warning and
+   have to provide them by hand).
+2. Creates `{{ redelk_remote_base_path }}` as `root:root 0750`. The tree holds
+   `redelk.secrets.yml`, the RedELK CA key and every client key.
+3. Copies the parts of the repository redelkctl needs: `redelkctl`, `VERSION`, `tools/`,
+   `elkserver/`, `c2servers/`, `redelk.yml` and `redelk.secrets.yml`.
+4. Seeds the directories RedELK writes to at runtime, without ever overwriting them.
+5. Runs `./redelkctl install`, which runs the pre-flight checks, regenerates the configuration and
+   brings the stack up with `docker compose`.
 
-- interpreting the install mode (`limited`, `full`, `dev`)
-- deriving memory settings, including `fixedmemory` and `dryrun` compatibility
-- extracting `elkserver.tgz` into the remote deployment path
-- rendering `.env` and RedELK application config files
-- preserving generated secrets across reruns
-- preparing self-signed or Let's Encrypt certificate paths
-- managing `vm.max_map_count`
-- starting the stack through Docker Compose v2
+## What it deliberately does not do
 
-This role is not responsible for installing Docker itself in the Ansible path.
-That remains in the separate `docker` role by design, matching the internal
-`infra_mgmnt` role boundary.
+- It does not create certificates, passwords, `.env` files or `config.json`. redelkctl does.
+- It does not delete anything on the server. `rsync --delete` would remove collected artefacts and
+  the Let's Encrypt state, so files that disappear from the repository stay behind on the server.
+- It does not manage Docker. Use the `docker` role, or install Docker yourself and set
+  `redelk_install_docker: false`.
 
-Key Variables
--------------
+## Two synchronisation passes
 
-- `redelk_local_repo_path`: local repository root used to locate `elkserver.tgz`
-- `redelk_remote_base_path`: remote base path, default `/opt/redelk`
-- `redelk_install_type`: explicit install type (`limited`, `full`, `dev`)
-- `redelk_elk_install_command`: legacy-compatible input used to infer mode flags
-- `redelk_fixedmemory`: explicit compatibility switch for legacy `fixedmemory`
-- `redelk_dryrun`: explicit compatibility switch for legacy `dryrun`
-- `redelk_extract_server_package`: enable archive extraction
-- `redelk_force_extract_server_package`: force re-extraction of `elkserver.tgz`
-- `redelk_letsencrypt_enabled`: switch between self-signed and Let's Encrypt flow
-- `redelk_external_domain`: required when Let's Encrypt is enabled
-- `redelk_letsencrypt_email`: required when Let's Encrypt is enabled
-- `redelk_start_containers`: control whether the role starts the stack
+`elkserver/mounts/` mixes shipped configuration with live data, so it is copied twice:
 
-Design Notes
-------------
+| Pass | Contents | Semantics |
+| --- | --- | --- |
+| 1 | everything in `redelk_server_repo_paths` except `redelk_server_runtime_excludes` | update in place |
+| 2 | `elkserver/mounts` with `--ignore-existing` | seed once, never overwrite |
 
-- Docker is expected to exist already. The role only performs Docker preflight
-  checks.
-- `.env`, `config.json`, BloodHound config, and password reference files are
-  managed declaratively on reruns.
-- Existing generated secrets are read back from current files before rendering,
-  so reruns stay stable.
-- The role follows the internal Ansible approach rather than the legacy shell
-  process where that keeps behavior cleaner and more idempotent.
+That keeps a redeploy from throwing away the ip and domain lists RedELK synchronises with
+Elasticsearch, the screenshots and downloads under `redelk-www/`, the operators' Jupyter notebooks,
+the daemon logs and the Let's Encrypt state.
 
-Intentional Differences From The Legacy Script
-----------------------------------------------
+`elkserver/.env` is excluded from both passes on purpose: with `server.memory.mode: auto`,
+redelkctl derives the Elasticsearch and Neo4j heap sizes from the RAM of the machine it runs on,
+which has to be the server rather than your laptop.
 
-- Docker bootstrap stays outside this role.
-- Deployment uses an Ansible archive/extract workflow instead of running
-  directly inside a manually extracted source tree.
-- Certificate and Compose handling use Ansible modules instead of matching the
-  exact shell command sequence.
+Both passes compare content rather than timestamps (`--checksum --no-times`). `redelkctl generate`
+rewrites a handful of files with identical bytes on every run - the CA copy the Logstash beats
+input serves, for one - and a redeploy should only report a change when something actually
+changed.
 
-Validation
-----------
+## Variables
 
-This role is exercised in the `molecule/redelk` scenario together with
-`redelk-client`.
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `redelk_repo_path` | `{{ playbook_dir \| dirname }}` | Repository root on the control node |
+| `redelk_config_file` | `redelk.yml` | Config file, relative to the repository root |
+| `redelk_remote_base_path` | `/opt/redelk` | Where the repository lands on the server |
+| `redelk_server_run_install` | `true` | Run `redelkctl install` after copying |
+| `redelk_install_args` | `[]` | Extra flags, e.g. `["--pull"]` |
+| `redelk_server_repo_paths` | see `defaults/main.yml` | Which parts of the repository to copy |
+| `redelk_server_runtime_excludes` | see `defaults/main.yml` | Paths the server owns |
+| `redelk_server_prerequisites` | `[rsync, python3-venv]` | Packages installed on apt hosts |
+
+## Requirements
+
+- `become: true`, with passwordless sudo when you do not log in as root: `rsync` runs on the far
+  end and cannot answer a password prompt.
+- `rsync` on the control node.
+- Docker Engine with the Compose v2 plugin on the server before `redelkctl install` runs.
+- Outbound network access on the server for the container images (and for redelkctl's virtualenv,
+  unless `python3-yaml`, `python3-jinja2` and `python3-cryptography` are already installed).

@@ -1,0 +1,320 @@
+####################################################################################################
+#
+#  RedELK - single configuration file
+#
+#  This is the ONLY file you need to edit to deploy RedELK. Everything else - TLS certificates,
+#  passwords, docker environment files, filebeat configs, cron jobs, C2 connectors - is generated
+#  from this file by `./redelkctl`.
+#
+#  Quick start:
+#      cp redelk.yml.example redelk.yml
+#      $EDITOR redelk.yml            # at minimum: server.hostnames and your c2_servers
+#      ./redelkctl install           # generate everything and start the stack
+#
+#  Secrets (Elasticsearch/Kibana/Neo4j/... passwords) are generated on first run and stored in
+#  redelk.secrets.yml (mode 0600, git-ignored). You never need to edit that file, but you can if
+#  you want to pin a specific password. Delete it to have everything regenerated.
+#
+#  Every value below is optional unless marked REQUIRED - defaults are shown.
+#
+####################################################################################################
+
+# Config schema version. Do not change.
+version: 3
+
+####################################################################################################
+# Project
+####################################################################################################
+project:
+  # Name of the operation. Shown in Kibana and used in notifications.
+  name: redelk-project
+
+  # Default attack scenario for hosts that do not set their own. Attack scenarios let you separate
+  # e.g. "phishing" from "assumed-breach" traffic in the same RedELK instance.
+  attack_scenario: default
+
+####################################################################################################
+# RedELK server
+####################################################################################################
+server:
+  # REQUIRED. All DNS names the RedELK server is reachable on. Used for the TLS certificates that
+  # redirectors and C2 servers validate, and for the nginx/Let's Encrypt configuration.
+  # The first entry is the primary name.
+  hostnames:
+    - redelk.example.com
+
+  # Additional IP addresses to put in the certificate (optional).
+  ips: []
+    # - 198.51.100.10
+
+  # full    = Elastic stack + Jupyter notebooks + BloodHound CE (Neo4j + Postgres). Needs >= 8GB RAM.
+  # limited = Elastic stack only. Needs >= 4GB RAM.
+  profile: full
+
+  # Where redirectors and C2 servers ship their logs to. This is the address they connect to, which
+  # may differ from server.hostnames[0] if you are behind NAT. Leave empty to use hostnames[0].
+  ingest_host: ""
+  ingest_port: 5044
+
+  # Memory tuning. "auto" derives the Elasticsearch heap (and Neo4j heap on the full profile) from
+  # the total memory of the RedELK server. Override with explicit values if the host is shared.
+  memory:
+    mode: auto # auto | manual
+    elasticsearch_heap: "" # e.g. 4g   (only used when mode: manual)
+    neo4j_heap: "" # e.g. 8G   (only used when mode: manual)
+
+  # Which interface the service ports are published on. Keep these on localhost and reach them
+  # through the nginx reverse proxy (port 443) unless you know what you are doing.
+  bind:
+    kibana: 127.0.0.1
+    elasticsearch: 127.0.0.1
+    neo4j: 127.0.0.1
+    bloodhound: 127.0.0.1
+
+  # Public ports of the nginx reverse proxy.
+  ports:
+    http: 80
+    https: 443
+    bloodhound: 8443
+
+  tls:
+    # self-signed = generate a certificate for server.hostnames[0] (default, works everywhere)
+    # letsencrypt = request a certificate from Let's Encrypt (server.hostnames[0] must resolve
+    #               publicly to this host and port 80 must be reachable)
+    # custom      = use your own certificate and key (paths on the RedELK server)
+    mode: self-signed
+
+    letsencrypt:
+      email: ""
+      staging: false
+
+    custom:
+      certificate: ""
+      key: ""
+
+    # Validity of the internal RedELK CA and the beats/logstash certificates.
+    ca_validity_days: 3650
+    cert_validity_days: 825
+
+    # Require redirectors and C2 servers to present a client certificate signed by the RedELK CA.
+    # Recommended. Set to false only if you have hosts that cannot be re-provisioned.
+    mutual_auth: true
+
+####################################################################################################
+# Elastic stack
+####################################################################################################
+elastic:
+  # Elastic stack version used for Elasticsearch, Kibana, Logstash and the Filebeat shippers.
+  version: "9.5.0"
+
+  # Docker repository and tag for the two images RedELK builds itself (redelk-base and
+  # redelk-jupyter). Elasticsearch, Kibana and Logstash use the stock docker.elastic.co images.
+  image_repo: outflanknl
+  image_tag: "" # defaults to the contents of ./VERSION
+
+  # Build the RedELK images locally instead of pulling them. Useful when you modified them.
+  build_local: false
+
+  # Index lifecycle management.
+  retention:
+    # Days before an index is rolled over to the cold tier.
+    hot_days: 30
+    # Days before an index is deleted. 0 = keep forever.
+    delete_days: 365
+
+####################################################################################################
+# C2 servers
+#
+# Two ingestion styles are supported:
+#
+#   * files - filebeat runs on the C2 server and tails its log files. Screenshots, downloads and
+#             keystrokes are pulled to the RedELK server over rsync/ssh.
+#             Supported by: cobaltstrike, poshc2, sliver, outflankstage1
+#
+#   * api   - the RedELK server talks to the C2 framework's own API. Nothing is installed on the
+#             C2 server, and files/screenshots that only exist inside the C2 database are pulled
+#             through the API. Supported by: mythic, outflankc2
+#
+# The `type` determines which one is used; `ingest` lets you override it where both are possible.
+####################################################################################################
+c2_servers: []
+  # ---------------------------------------------------------------------------------------------
+  # Cobalt Strike (file based)
+  # ---------------------------------------------------------------------------------------------
+  # - name: c2server1                    # unique, used as the hostname in Kibana
+  #   type: cobaltstrike
+  #   attack_scenario: assumed-breach
+  #   host: 198.51.100.20                # address the RedELK server connects to for file sync
+  #   ssh:
+  #     user: scponly
+  #     port: 22
+  #   paths:
+  #     base: /root/cobaltstrike/server  # the directory holding logs/ and data/
+  #
+  # ---------------------------------------------------------------------------------------------
+  # Sliver (file based)
+  # ---------------------------------------------------------------------------------------------
+  # - name: c2server2
+  #   type: sliver
+  #   host: 198.51.100.21
+  #   paths:
+  #     base: /root/.sliver
+  #
+  # ---------------------------------------------------------------------------------------------
+  # PoshC2 (file based)
+  # ---------------------------------------------------------------------------------------------
+  # - name: c2server3
+  #   type: poshc2
+  #   host: 198.51.100.22
+  #   paths:
+  #     base: /opt/PoshC2_Project
+  #
+  # ---------------------------------------------------------------------------------------------
+  # Outflank Stage1 C2 (file based, the predecessor of Outflank C2)
+  # ---------------------------------------------------------------------------------------------
+  # - name: c2server4
+  #   type: outflankstage1
+  #   host: 198.51.100.23
+  #   paths:
+  #     base: /root/stage1c2server
+  #
+  # ---------------------------------------------------------------------------------------------
+  # Outflank C2 (API based)
+  # ---------------------------------------------------------------------------------------------
+  # - name: oc2
+  #   type: outflankc2
+  #   attack_scenario: assumed-breach
+  #   api:
+  #     url: https://oc2.example.com:11000
+  #     username: redelk
+  #     password: "<join key / password of a dedicated read-only user>"
+  #     verify_tls: true
+  #     poll_interval: 60          # seconds between polls
+  #     download_files: true       # pull downloaded files/screenshots into RedELK
+  #     max_file_size: 104857600   # skip files larger than this (bytes)
+  #
+  # ---------------------------------------------------------------------------------------------
+  # Mythic (API based)
+  # ---------------------------------------------------------------------------------------------
+  # - name: mythic1
+  #   type: mythic
+  #   attack_scenario: phishing
+  #   api:
+  #     url: https://mythic.example.com:7443
+  #     token: "<Mythic API token>"      # preferred; or use username/password below
+  #     username: ""
+  #     password: ""
+  #     verify_tls: true
+  #     poll_interval: 60
+  #     download_files: true
+  #     max_file_size: 104857600
+
+####################################################################################################
+# Redirectors
+####################################################################################################
+redirectors: []
+  # - name: redir1
+  #   type: haproxy                      # haproxy | nginx | apache
+  #   attack_scenario: phishing
+  # - name: redir2
+  #   type: nginx
+
+####################################################################################################
+# Notifications - where alarms are sent
+####################################################################################################
+notifications:
+  email:
+    enabled: false
+    host: localhost
+    port: 25
+    # tls: starttls | ssl | none
+    tls: starttls
+    username: ""
+    password: ""
+    from: redelk@example.com
+    to:
+      - redteam@example.com
+
+  slack:
+    enabled: false
+    webhook_url: ""
+
+  msteams:
+    enabled: false
+    # Microsoft retired Office 365 connectors; use a Power Automate "Workflows" webhook URL here.
+    webhook_url: ""
+
+####################################################################################################
+# Threat intelligence / enrichment API keys
+#
+# Every key is optional. Modules that need a key are skipped automatically when it is empty.
+####################################################################################################
+api_keys:
+  virustotal: ""
+  ibm_xforce: "" # "Basic <base64>" or the raw key:password pair
+  hybrid_analysis: ""
+  greynoise: ""
+
+####################################################################################################
+# Alarm and enrichment modules
+#
+# `interval` is the minimum number of seconds between two runs of a module.
+####################################################################################################
+modules:
+  # How often the RedELK daemon wakes up, in seconds.
+  interval: 60
+  loglevel: WARNING
+
+  alarms:
+    # Needs at least one of api_keys.virustotal / ibm_xforce / hybrid_analysis.
+    filehash: { enabled: false, interval: 300 }
+    httptraffic: { enabled: true, interval: 310, notify_interval: 86400 }
+    useragent: { enabled: true, interval: 320 }
+    backendalarm: { enabled: true, interval: 320 }
+    manual: { enabled: false, interval: 300 }
+    dummy: { enabled: false, interval: 300 }
+
+  enrich:
+    csbeacon: { enabled: true, interval: 300 }
+    stage1: { enabled: true, interval: 300 }
+    sliver: { enabled: true, interval: 300 }
+    mythic: { enabled: true, interval: 60 }
+    outflankc2: { enabled: true, interval: 60 }
+    # Needs api_keys.greynoise. RedELK no longer ships a shared community key.
+    greynoise: { enabled: false, interval: 310, cache: 86400 }
+    tor: { enabled: true, interval: 360, cache: 3600 }
+    iplists: { enabled: true, interval: 30 }
+    synciplists: { enabled: true, interval: 360 }
+    syncdomainslists: { enabled: true, interval: 355 }
+    # Needs api_keys.virustotal or api_keys.ibm_xforce.
+    domainscategorization: { enabled: false, interval: 345 }
+
+####################################################################################################
+# Known-infrastructure lists
+#
+# These seed /etc/redelk/*.conf on the RedELK server. They are only written when the file does not
+# exist yet, because RedELK keeps them in sync with Elasticsearch at runtime - edit them in Kibana
+# once RedELK is running.
+####################################################################################################
+lists:
+  # Your own infrastructure and testing IPs - traffic from these is not alarmed.
+  redteam_ips: []
+    # - 198.51.100.0/24
+
+  # The customer's known IP ranges.
+  customer_ips: []
+
+  # Known blue team / sandbox / security vendor IPs - traffic from these raises an alarm.
+  blueteam_ips: []
+
+  # Domains you own and use in the operation.
+  redteam_domains: []
+
+  # Domains that must never be visited by your implants (sandbox callbacks, etc).
+  rogue_domains: []
+
+  # User agents that indicate scanning or analysis rather than a real target.
+  rogue_useragents:
+    - curl
+    - wget
+    - python-requests

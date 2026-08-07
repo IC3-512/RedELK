@@ -1,0 +1,98 @@
+# Fixture consumed by .github/workflows/validate.yml.
+#
+# redelk.yml.example is validated too, but it ships with empty c2_servers and redirectors so it
+# never exercises the per-host rules. This file covers one host of every ingestion style: a
+# file-based C2 pulled over ssh, both API-based C2s, and the three redirector types.
+#
+# Nothing here is a real address or a real credential.
+version: 3
+
+project:
+  name: redelk-ci
+  attack_scenario: default
+
+server:
+  hostnames:
+    - redelk.example.com
+    - redelk-alt.example.com
+  ips:
+    - 198.51.100.10
+  profile: full
+  ingest_host: 198.51.100.10
+  tls:
+    mode: self-signed
+    mutual_auth: true
+
+elastic:
+  version: "9.5.0"
+
+c2_servers:
+  - name: cs1
+    type: cobaltstrike
+    attack_scenario: assumed-breach
+    host: 198.51.100.20
+    ssh:
+      user: scponly
+      port: 22
+    paths:
+      base: /root/cobaltstrike/server
+
+  - name: posh1
+    type: poshc2
+    host: 198.51.100.21
+
+  - name: sliver1
+    type: sliver
+    host: 198.51.100.22
+
+  - name: stage1
+    type: outflankstage1
+    host: 198.51.100.23
+
+  - name: mythic1
+    type: mythic
+    attack_scenario: phishing
+    api:
+      url: https://mythic.example.com:7443
+      token: ci-fixture-token
+      poll_interval: 60
+
+  - name: oc2
+    type: outflankc2
+    api:
+      url: https://oc2.example.com:11000
+      username: redelk
+      password: ci-fixture-join-key
+
+  - name: disabled1
+    type: cobaltstrike
+    enabled: false
+    host: 198.51.100.24
+
+redirectors:
+  - name: redir1
+    type: haproxy
+    attack_scenario: phishing
+  - name: redir2
+    type: nginx
+  - name: redir3
+    type: apache
+
+notifications:
+  slack:
+    enabled: true
+    webhook_url: https://hooks.slack.example.com/services/CI/FIXTURE
+
+# The enrichment modules that are on by default refuse to start without a key, so the fixture
+# carries placeholders. Nothing in CI ever calls these APIs.
+api_keys:
+  virustotal: ci-fixture-virustotal-key
+  greynoise: ci-fixture-greynoise-key
+
+lists:
+  redteam_ips:
+    - 198.51.100.0/24
+  blueteam_ips:
+    - 203.0.113.7
+  redteam_domains:
+    - phish.example.com

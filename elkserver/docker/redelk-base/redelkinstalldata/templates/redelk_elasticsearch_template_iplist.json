@@ -1,61 +1,36 @@
 {
-    "aliases": {},
-    "index_patterns": [
-        "iplist-*"
-    ],
-    "mappings": {
-        "_routing": {
-            "required": false
-        },
-        "_source": {
-            "enabled": true,
-            "excludes": [],
-            "includes": []
-        },
-        "date_detection": true,
-        "dynamic": true,
-        "dynamic_date_formats": [
-            "strict_date_optional_time",
-            "yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"
-        ],
-        "numeric_detection": false,
-        "properties": {
-            "@timestamp": {
-                "doc_values": true,
-                "ignore_malformed": false,
-                "index": true,
-                "store": false,
-                "type": "date"
-            },
-            "date_modified": {
-                "type": "date"
-            },
-            "ip": {
-                "type": "ip"
-            },
-            "list": {
-                "type": "keyword"
-            },
-            "source": {
-                "type": "keyword"
-            }
-        }
-    },
-    "order": 0,
+  "index_patterns": [
+    "redelk-iplist-*"
+  ],
+  "priority": 300,
+  "composed_of": [
+    "redelk-lists"
+  ],
+  "template": {
     "settings": {
-        "index": {
-            "mapping": {
-                "total_fields": {
-                    "limit": "10000"
-                }
-            },
-            "number_of_replicas": "0",
-            "number_of_shards": "1",
-            "query": {
-                "default_field": "*"
-            },
-            "refresh_interval": "5s"
-        }
+      "index.lifecycle.name": "redelk",
+      "index.number_of_shards": 1,
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "5s",
+      "index.mapping.total_fields.limit": 10000
     },
-    "version": 1
+    "mappings": {
+      "dynamic": true,
+      "date_detection": false,
+      "numeric_detection": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "managed_by": "redelk",
+    "description": "Known-infrastructure IP lists: one index per list (redelk-iplist-redteam, -customer, -blueteam, -unknown, -tor). Documents are written by modules/enrich_synciplists and modules/enrich_tor as {@timestamp, iplist:{name, source, ip, comment}}. The priority is above the redelk-* template because a composable index template does not merge with a lower priority one, it replaces it. The pre-v3 template matched iplist-* and mapped flat ip/list/source fields, which no document in RedELK has ever had.",
+    "authors": [
+      "Outflank B.V. / Mark Bergman (@xychix)",
+      "Lorenzo Bernardi (@fastlorenzo)"
+    ]
+  }
 }

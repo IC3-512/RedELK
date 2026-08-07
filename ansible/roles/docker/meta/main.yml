@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT-0
 galaxy_info:
   author: RedELK
-  description: Install Docker Engine on Ubuntu using Docker's official apt repository.
+  description: Install Docker Engine on Ubuntu or Debian using Docker's official apt repository.
   license: MIT
   min_ansible_version: "2.14"
 
@@ -13,10 +13,16 @@ galaxy_info:
         - noble
         - questing
         - resolute
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+        - trixie
 
   galaxy_tags:
     - docker
     - containers
     - ubuntu
+    - debian
 
 dependencies: []

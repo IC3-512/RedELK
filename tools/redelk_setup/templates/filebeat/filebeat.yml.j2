@@ -1,0 +1,47 @@
+{{ header }}
+# Filebeat main configuration for {{ name }}.
+# Input definitions live in inputs.d/ and are reloaded automatically.
+
+name: {{ name | to_yaml_scalar }}
+
+filebeat.config.inputs:
+  enabled: true
+  path: ${path.config}/inputs.d/*.yml
+  reload.enabled: true
+  reload.period: 10s
+
+filebeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+
+fields_under_root: true
+{% if is_redirector %}
+fields:
+  infra:
+    attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+{% endif %}
+
+# RedELK does its own processing in Logstash; the default host/cloud metadata processors only
+# add noise to the rtops and redirtraffic indices.
+processors:
+  - add_host_metadata:
+      netinfo.enabled: false
+
+output.logstash:
+  hosts: ["{{ endpoint }}"]
+  ssl.enabled: true
+  ssl.certificate_authorities: ["/etc/filebeat/certs/redelkCA.crt"]
+{% if mutual_auth %}
+  # Mutual TLS: Logstash only accepts shippers holding a certificate signed by the RedELK CA.
+  ssl.certificate: "/etc/filebeat/certs/client.crt"
+  ssl.key: "/etc/filebeat/certs/client.key"
+{% endif %}
+  ssl.verification_mode: full
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0640

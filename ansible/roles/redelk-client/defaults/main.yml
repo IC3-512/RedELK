@@ -1,33 +1,25 @@
 ---
-redelk_local_repo_path: "{{ playbook_dir | dirname }}"
+# The RedELK repository on the control node: the directory holding redelk.yml and ./redelkctl.
+redelk_repo_path: "{{ playbook_dir | dirname }}"
+
+# Where './redelkctl generate' wrote the per-host installation packages.
+redelk_packages_path: "{{ redelk_repo_path }}/build/packages"
+
+# The package this host gets: build/packages/<redelk_package_name>/. The inventory host name ties
+# an inventory entry to its redelk.yml entry; override it per host only when they cannot match.
+redelk_package_name: "{{ inventory_hostname }}"
+
+# Where the package is staged on the host. It carries this host's private key, so it is created
+# root-owned and unreadable by anyone else.
 redelk_remote_base_path: /opt/redelk
-redelk_identifier: "{{ inventory_hostname }}"
-redelk_manage_locale: true
-redelk_locale_lang: en_US.UTF-8
-redelk_locale_lc_all: en_US.UTF-8
-es_version: "7.17.9"
-redelk_filebeat_package: "filebeat={{ es_version }}"
-redelk_elastic_repo_key_url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
-redelk_elastic_repo_key_path: /etc/apt/keyrings/elastic.asc
-redelk_elastic_repo_url: https://artifacts.elastic.co/packages/7.x/apt
-redelk_filebeat_ca_path: /etc/filebeat/redelkCA.crt
-redelk_filebeat_main_config: /etc/filebeat/filebeat.yml
-redelk_filebeat_inputs_dir: /etc/filebeat/inputs.d
-redelk_filebeat_redir_input_file: "{{ redelk_filebeat_inputs_dir }}/redirs.yml"
-redelk_redir_manage_haproxy_logrotate: true
-redelk_redir_haproxy_logrotate_path: /etc/logrotate.d/haproxy
-redelk_log_dir: /var/log/redelk
-redelk_bin_dir: /usr/share/redelk/bin
-redelk_sync_user: scponly
-redelk_sync_user_home: "/home/{{ redelk_sync_user }}"
-redelk_sync_user_shell: /usr/sbin/rush
-redelk_sync_public_key_path: "{{ redelk_local_repo_path }}/c2servers/ssh/id_rsa.pub"
-redelk_c2_filebeat_inputs:
-  - cobaltstrike
-  - outflankstage1
-  - poshc2
-  - sliver
-redelk_c2_sync_jobs:
-  - cobaltstrike
-  - outflankstage1
-  - sliver
+redelk_client_package_path: "{{ redelk_remote_base_path }}/{{ redelk_package_name }}"
+
+# Extra flags for the generated installer, for example ["--dry-run"] or ["--no-filebeat"].
+redelk_client_install_args: []
+
+# The installer runs when the package changed or when this host has no filebeat configuration yet.
+# Set to true to run it on every play, for example after changing something by hand on the host.
+redelk_client_force_install: false
+
+# What the installer writes, used to tell "already installed" from "never installed".
+redelk_client_filebeat_config: /etc/filebeat/filebeat.yml

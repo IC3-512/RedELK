@@ -1,0 +1,13 @@
+---
+# Run by the 'ansible-lint' job in .github/workflows/molecule.yml, and locally with:
+#
+#   ansible-galaxy collection install -r collections.yml -p .ansible/collections
+#   ANSIBLE_COLLECTIONS_PATH=$PWD/.ansible/collections ansible-lint --offline
+exclude_paths:
+  - .ansible/ # collections installed for a molecule run
+
+skip_list:
+  # The roles are named after the components they deploy (redelk-server, redelk-client) and match
+  # the hyphenated naming used everywhere else in RedELK (redelk-base, redelk-jupyter). None of
+  # them is published to Ansible Galaxy, which is where the underscore rule comes from.
+  - role-name

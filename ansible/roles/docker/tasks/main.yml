@@ -1,19 +1,24 @@
 # SPDX-License-Identifier: MIT-0
 ---
-- name: Ensure target is Ubuntu
+- name: Ensure the target runs a distribution Docker publishes packages for
   ansible.builtin.assert:
     that:
       - ansible_facts["os_family"] == "Debian"
-      - ansible_facts["distribution"] == "Ubuntu"
-    fail_msg: "This role currently supports Ubuntu only."
+      - ansible_facts["distribution"] in docker_supported_releases
+    fail_msg: >-
+      This role installs Docker from Docker's own apt repository, which exists for
+      {{ docker_supported_releases | list | join(' and ') }} only - this host reports
+      '{{ ansible_facts["distribution"] }}'. Install Docker Engine by hand and run the playbook
+      with redelk_install_docker=false.
 
-- name: Ensure Ubuntu release is supported by this role
+- name: Ensure the release is supported by this role
   ansible.builtin.assert:
     that:
-      - ansible_facts["distribution_release"] in ['focal', 'jammy', 'noble', 'questing', 'resolute']
+      - ansible_facts["distribution_release"] in docker_supported_releases[ansible_facts["distribution"]]
     fail_msg: >-
-      Unsupported Ubuntu release '{{ ansible_facts["distribution_release"] }}'.
-      Supported by this role: focal (legacy), jammy, noble, questing, resolute.
+      Unsupported {{ ansible_facts["distribution"] }} release
+      '{{ ansible_facts["distribution_release"] }}'. Supported by this role:
+      {{ docker_supported_releases[ansible_facts["distribution"]] | join(', ') }}.
 
 - name: Warn when using Ubuntu 20.04 (EOL)
   ansible.builtin.debug:
@@ -57,7 +62,7 @@
 
 - name: Install Docker apt signing key
   ansible.builtin.get_url:
-    url: https://download.docker.com/linux/ubuntu/gpg
+    url: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}/gpg"
     dest: /etc/apt/keyrings/docker.asc
     owner: root
     group: root
@@ -65,13 +70,8 @@
 
 - name: Map system architecture to Docker apt architecture
   ansible.builtin.set_fact:
-    docker_apt_arch: "{{ docker_arch_map.get(ansible_facts['architecture'], ansible_facts['architecture']) }}"
-  vars:
-    docker_arch_map:
-      x86_64: amd64
-      aarch64: arm64
-      armv7l: armhf
-      ppc64le: ppc64el
+    docker_apt_arch: >-
+      {{ docker_apt_arch_map.get(ansible_facts['architecture'], ansible_facts['architecture']) }}
 
 - name: Ensure architecture is supported by Docker apt repository
   ansible.builtin.assert:
@@ -87,7 +87,7 @@
     types:
       - deb
     uris:
-      - https://download.docker.com/linux/ubuntu
+      - "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}"
     suites:
       - "{{ ansible_facts['distribution_release'] }}"
     components:
