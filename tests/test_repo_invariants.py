@@ -315,8 +315,16 @@ def _dashboard_documents():
         REPO_ROOT
         / "elkserver/docker/redelk-base/redelkinstalldata/templates/redelk_kibana_03_dashboards.ndjson"
     )
+    # The file also carries the objects the dashboards reference by id - the source-geography
+    # map, for one - and those have no panelsJSON.
     return [
-        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+        document
+        for document in (
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+        if document.get("type") == "dashboard"
     ]
 
 

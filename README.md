@@ -20,17 +20,36 @@ infrastructure.
 
 ![RedELK redirector traffic](./images/dashboard-traffic.png)
 
-RedELK ships nine dashboards. The rest:
+RedELK ships nine dashboards. The other seven:
 
-| | |
-|---|---|
-| [MITRE ATT&CK coverage](./images/dashboard-mitre.png) | Which techniques and tactics the operation actually executed, from the C2's own metadata. |
-| [Implants](./images/dashboard-implants.png) | Every implant, its host, user, process and check-in. |
-| [Alarms](./images/dashboard-alarms.png) | What the alarm modules flagged, and the traffic behind it. |
-| [Screenshots](./images/dashboard-screenshots.png) | Screenshots pulled from the C2, inline. |
-| [Downloads](./images/dashboard-downloads.png) | Files the implants retrieved, with hashes and sizes. |
-| [Credentials](./images/dashboard-credentials.png) | Credentials the operation collected. |
-| [Health](./images/dashboard-health.png) | Whether every enrichment and alarm module is actually running. |
+**MITRE ATT&CK coverage** - which techniques and tactics the operation actually executed, taken
+from the C2's own metadata.
+
+![RedELK MITRE ATT&CK coverage](./images/dashboard-mitre.png)
+
+**Implants** - every implant, with its host, user, process and check-in.
+
+![RedELK implants](./images/dashboard-implants.png)
+
+**Alarms** - what the alarm modules flagged, and the traffic behind it.
+
+![RedELK alarms](./images/dashboard-alarms.png)
+
+**Screenshots** - screenshots pulled from the C2, shown inline.
+
+![RedELK screenshots](./images/dashboard-screenshots.png)
+
+**Downloads** - the files implants retrieved, with hashes and sizes.
+
+![RedELK downloads](./images/dashboard-downloads.png)
+
+**Credentials** - what the operation collected.
+
+![RedELK credentials](./images/dashboard-credentials.png)
+
+**Health** - whether every enrichment and alarm module is actually running.
+
+![RedELK health](./images/dashboard-health.png)
 
 ## Quickstart
 

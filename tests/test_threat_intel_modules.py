@@ -201,3 +201,42 @@ def test_both_xforce_clients_build_the_same_header(daemon_env):
     from modules.enrich_domainscategorization import cat_ibmxforce
 
     assert IBM("id:secret").basic_auth == cat_ibmxforce.authorization_header("id:secret")
+
+
+# ------------------------------------------------------------------------------------------------
+# Downloaded files have to be readable by nginx
+# ------------------------------------------------------------------------------------------------
+
+
+def test_a_downloaded_file_is_readable_by_the_web_server(daemon_env, tmp_path, monkeypatch):
+    """Screenshots and downloads are written into the nginx web root to be served from it.
+
+    tempfile.mkstemp() creates its file 0600 and os.replace() keeps that mode, so every download
+    used to land unreadable by the nginx worker: the operator saw the thumbnail (Pillow writes
+    those through the normal umask) and got 403 on the full screenshot and on every file.
+    """
+    daemon_env({})
+    from modules.c2api import http as c2http
+
+    class FakeResponse:
+        status_code = 200
+        headers: dict = {}
+
+        def iter_content(self, chunk_size=0):
+            yield b"downloaded bytes"
+
+        def close(self):
+            pass
+
+    client = c2http.__dict__["ApiClient"].__new__(c2http.__dict__["ApiClient"])
+    client.logger = __import__("logging").getLogger("test")
+
+    destination = tmp_path / "grabbed.png"
+    written = c2http.ApiClient._stream_to_file(
+        client, FakeResponse(), str(destination), str(tmp_path), 0, "https://c2/file"
+    )
+
+    assert written == len(b"downloaded bytes")
+    assert destination.read_bytes() == b"downloaded bytes"
+    mode = destination.stat().st_mode & 0o777
+    assert mode == 0o644, f"stored {oct(mode)}; nginx runs as its own user and answers 403 on 0600"

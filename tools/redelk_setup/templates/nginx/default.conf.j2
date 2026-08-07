@@ -86,9 +86,10 @@ server {
             add_header Content-Type text/plain;
             add_header X-Content-Type-Options nosniff;
         }
-        location ~* \.(jpg|jpeg|png)$ {
-            add_header Content-Type image/jpeg;
-        }
+        # No Content-Type override for images: nginx already derives image/png and image/jpeg
+        # from mime.types, and `add_header Content-Type ...` appends a second, wrong header
+        # rather than replacing the first - every screenshot was announced as image/jpeg,
+        # whatever it actually was.
         location ~* \.json$ {
             add_header Content-Type application/json;
         }

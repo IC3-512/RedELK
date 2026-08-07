@@ -37,6 +37,10 @@ DEFAULT_TIMEOUT = 30
 # the size limit is enforced long before the file is in memory.
 CHUNK_SIZE = 64 * 1024
 
+# Downloaded files land in the nginx web root and exist to be served from it, so they have to be
+# readable by the nginx worker. They are already behind the server's basic auth.
+FILE_MODE = 0o644
+
 # Redirects are followed by hand (see ApiClient.request), so they need their own bound.
 MAX_REDIRECTS = 5
 
@@ -216,6 +220,12 @@ class ApiClient:
                 handle.write(chunk)
             handle.close()
             handle = None
+            # mkstemp() creates the file 0600 and os.replace() keeps that mode, so without this
+            # every downloaded file and every full screenshot lands in the web root unreadable by
+            # anyone but the daemon - nginx answers 403 and the operator cannot open the
+            # screenshot or retrieve the file. Only the thumbnails worked, because Pillow writes
+            # those through the normal umask.
+            os.chmod(temp_path, FILE_MODE)
             os.replace(temp_path, destination)
             return written
         except (OSError, requests.RequestException) as error:
