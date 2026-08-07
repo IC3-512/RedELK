@@ -67,7 +67,9 @@ docker run --rm \
   -v "$PWD/elkserver/mounts/logstash-config/redelk-main:/usr/share/logstash/redelk-main:ro" \
   -e CERTS_LOGSTASH_INPUT_CRT=/certs/logstash.crt \
   -e CERTS_LOGSTASH_INPUT_KEY=/certs/logstash.key \
+  -e CERTS_LOGSTASH_INPUT_CA=/certs/ca.crt \
   -e CERTS_LOGSTASH_OUTPUT_CA=/certs/ca.crt \
+  -e LOGSTASH_CLIENT_AUTH=required \
   -e CREDS_redelk_ingest=configtest \
   -v "$PWD/build/certs:/certs:ro" \
   docker.elastic.co/logstash/logstash:9.5.0 \

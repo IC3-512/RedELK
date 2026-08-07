@@ -134,7 +134,9 @@ jobs:
             -v "${RUNNER_TEMP}/certs:/certs:ro" \
             -e CERTS_LOGSTASH_INPUT_CRT=/certs/logstash.crt \
             -e CERTS_LOGSTASH_INPUT_KEY=/certs/logstash.key \
+            -e CERTS_LOGSTASH_INPUT_CA=/certs/ca.crt \
             -e CERTS_LOGSTASH_OUTPUT_CA=/certs/ca.crt \
+            -e LOGSTASH_CLIENT_AUTH=required \
             -e CREDS_redelk_ingest=configtest \
             "docker.elastic.co/logstash/logstash:${ELASTIC_VERSION}" \
             logstash \

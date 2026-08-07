@@ -35,13 +35,10 @@ jobs:
     # is roughly three times a healthy run, so a hang is caught without killing a slow one.
     timeout-minutes: 75
 
-    env:
-      # The deployment is installed by the step below, from a copy of the fixture configuration.
-      # The copy keeps the tracked file untouched: the Mythic seeding fixture rewrites the
-      # redelk.yml it is given (api.url has to point at the fake server), and redelk.secrets.yml
-      # is written next to it.
-      E2E_CONFIG: ${{ runner.temp }}/redelk-e2e/redelk.yml
-
+    # E2E_CONFIG is exported by the staging step below rather than declared here: the `runner`
+    # context is not available to a workflow- or job-level `env:`, only inside a step. Using it
+    # here made GitHub refuse to load the file, which shows up as a failed run on every push -
+    # on a workflow that is not even supposed to run on push.
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -64,11 +61,15 @@ jobs:
           free -m
           df -h /
 
+      # The deployment is installed from a copy of the fixture configuration. The copy keeps the
+      # tracked file untouched: the Mythic seeding fixture rewrites the redelk.yml it is given
+      # (api.url has to point at the fake server), and redelk.secrets.yml is written next to it.
       - name: Stage the e2e configuration
         run: |
-          mkdir -p "$(dirname "${E2E_CONFIG}")"
-          cp tests/e2e/fixtures/redelk.e2e.yml "${E2E_CONFIG}"
-          ./redelkctl --config "${E2E_CONFIG}" validate
+          mkdir -p "${RUNNER_TEMP}/redelk-e2e"
+          cp tests/e2e/fixtures/redelk.e2e.yml "${RUNNER_TEMP}/redelk-e2e/redelk.yml"
+          echo "E2E_CONFIG=${RUNNER_TEMP}/redelk-e2e/redelk.yml" >> "${GITHUB_ENV}"
+          ./redelkctl --config "${RUNNER_TEMP}/redelk-e2e/redelk.yml" validate
 
       # As root, exactly like a real install: the two ownership regressions the suite guards
       # against (Logstash's private key, the daemon's config.json) only appear when the installer

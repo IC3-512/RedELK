@@ -48,9 +48,13 @@
         - elkserver
         - c2servers
 
+    # An absolute path on purpose. A bare `src: redelk.yml` is resolved against Ansible's search
+    # path, which includes the project directory - so on a developer machine that has its own
+    # (gitignored) redelk.yml in the repository root, the scenario silently deployed that one and
+    # then failed on assertions about a configuration it never installed.
     - name: Install the scenario's redelk.yml
       ansible.builtin.copy:
-        src: redelk.yml
+        src: "{{ playbook_dir }}/files/redelk.yml"
         dest: "{{ molecule_repo }}/redelk.yml"
         mode: "0600"
 
