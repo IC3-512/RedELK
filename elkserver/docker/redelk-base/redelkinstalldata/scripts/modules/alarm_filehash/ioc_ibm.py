@@ -31,13 +31,17 @@ import datetime
 import logging
 
 import requests
-from modules.helpers import HTTP_TIMEOUT, get_value
+from modules.helpers import HTTP_TIMEOUT, get_value, xforce_authorization_header
 
 API_ROOT = "https://api.xforce.ibmcloud.com"
 
 # Used when the usage endpoint cannot be read: a subscription that does not expose
 # /all-subscriptions/usage should not disable hash checking altogether.
 DEFAULT_BUDGET = 10
+
+# Statuses that mean the credential will not be accepted for the rest of this run either.
+# Kept in step with enrich_domainscategorization/cat_ibmxforce.py, which does the same.
+FATAL_STATUS = (401, 402, 403)
 
 RESULT_ALARM = "newAlarm"
 RESULT_CLEAN = "clean"
@@ -50,8 +54,14 @@ class IBM:
 
     def __init__(self, basic_auth):
         self.logger = logging.getLogger("alarm_filehash.ioc_ibm")
-        self.basic_auth = basic_auth or ""
+        # api_keys.ibm_xforce is documented as accepting either "Basic <base64>" or the raw
+        # "<key>:<password>" pair. This used to send whatever was configured straight through, so
+        # the raw form - half of what the documentation promises - 401'd on every request.
+        self.basic_auth = xforce_authorization_header(basic_auth)
         self.enabled = bool(self.basic_auth)
+        # Set once a credential is refused, so one bad key costs one request rather than one per
+        # hash in the run.
+        self._credential_refused = False
 
     @property
     def _headers(self):
@@ -113,6 +123,8 @@ class IBM:
 
     def get_ibm_xforce_file_results(self, file_hash):
         """Look one hash up. Returns (status, payload) with status in found/notfound/quota/error."""
+        if self._credential_refused:
+            return "quota", None
         url = f"{API_ROOT}/malware/{file_hash}"
 
         try:
@@ -130,6 +142,16 @@ class IBM:
         if response.status_code == 404:  # Hash not found
             return "notfound", None
         if response.status_code == 429:
+            return "quota", None
+        if response.status_code in FATAL_STATUS:
+            # 401/402/403 will not change for the next hash either: the credential is wrong, or
+            # the subscription is absent or spent. Stop asking, the way the domain categorizer
+            # does, instead of a warning per hash for the rest of the run.
+            self._credential_refused = True
+            self.logger.warning(
+                "IBM X-Force refused the credential (HTTP %d); skipping the rest of this run",
+                response.status_code,
+            )
             return "quota", None
 
         self.logger.warning(

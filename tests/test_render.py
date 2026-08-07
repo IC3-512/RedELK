@@ -326,6 +326,46 @@ def test_lists_are_seeded_but_never_overwritten(generated, elkserver, result):
     assert "203.0.113.9" in target.read_text(encoding="utf-8")
 
 
+def test_a_list_entry_that_cannot_be_seeded_is_reported(generated, elkserver):
+    """Seeding happens once, so an entry added to redelk.yml later never reaches the file.
+
+    Keeping the file is right - it holds whatever was added through Kibana - but doing it in
+    silence meant an operator could add a domain mid-engagement, reinstall, and get nothing, with
+    no indication why.
+    """
+    cfg = generated({"lists": {"redteam_domains": ["evil.example", "worse.example"]}})
+    base = elkserver / "mounts" / "redelk-config" / "etc" / "redelk"
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "domainslist_redteam.conf").write_text(
+        "# seeded by an earlier install\nalready-there.example\n", encoding="utf-8"
+    )
+
+    result = render.RenderResult(written=[], skipped=[])
+    render.render_lists(cfg, elkserver, result)
+
+    warning = next(w for w in result.warnings if "domainslist_redteam.conf" in w)
+    assert "evil.example" in warning and "worse.example" in warning
+    assert "redelkctl generate" in warning
+    # And the existing entry is still untouched.
+    assert "already-there.example" in (base / "domainslist_redteam.conf").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_a_list_that_matches_the_config_reports_nothing(generated, elkserver):
+    cfg = generated({"lists": {"redteam_domains": ["evil.example"]}})
+    base = elkserver / "mounts" / "redelk-config" / "etc" / "redelk"
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "domainslist_redteam.conf").write_text(
+        "# comment\nevil.example  # added in Kibana\nextra.example\n", encoding="utf-8"
+    )
+
+    result = render.RenderResult(written=[], skipped=[])
+    render.render_lists(cfg, elkserver, result)
+
+    assert not [w for w in result.warnings if "domainslist_redteam.conf" in w]
+
+
 def test_the_ilm_policy_follows_the_retention_settings(generated, elkserver, result):
     cfg = generated({"elastic": {"retention": {"hot_days": 7, "delete_days": 90}}})
     render.render_ilm_policy(cfg, elkserver, result)

@@ -142,6 +142,7 @@ class Module:
         categories: list[str] = []
         parts: list[str] = []
 
+        answered = 0
         for engine in engines:
             name = getattr(engine, "NAME", engine.__class__.__name__.lower())
             self.logger.debug("Checking %s with %s", domain, name)
@@ -150,18 +151,26 @@ class Module:
             except Exception as error:  # pylint: disable=broad-except
                 # The engines catch their own errors; this is the last line of defence.
                 self.logger.error("Error checking domain %s with %s: %s", domain, name, error)
-                return None
+                continue
 
             if result.get("status") not in ANSWERED:
+                # One engine that cannot answer must not discard the ones that can. Requiring
+                # every engine meant an IBM X-Force key without a paid subscription - which
+                # answers 402 - turned the whole module into a no-op while still spending a
+                # VirusTotal lookup on every domain, every run.
                 self.logger.info(
-                    "%s could not categorize %s (%s); leaving the domain for the next run",
+                    "%s could not categorize %s (%s); keeping what the other engines said",
                     name,
                     domain,
                     result.get("status"),
                 )
-                return None
+                continue
 
-            engine_categories = list(result.get("categories", []))
+            answered += 1
+            # Sorted, because VirusTotal returns its categories as a JSON object and the order of
+            # a JSON object is not stable. An unsorted join made the same verdict compare unequal
+            # to itself and raised a bluecheck saying the categorization had changed.
+            engine_categories = sorted(set(result.get("categories", [])))
             categorization["engines"][name] = {
                 "categories": engine_categories,
                 "extra_data": result.get("extra_data", {}),
@@ -169,6 +178,12 @@ class Module:
             }
             categories.extend(engine_categories)
             parts.append(f"{name}={','.join(engine_categories)}")
+
+        if not answered:
+            self.logger.info(
+                "no categorization engine could answer for %s; leaving it for the next run", domain
+            )
+            return None
 
         categorization["categories"] = sorted(set(categories))
         categorization["categories_str"] = " ".join(parts)

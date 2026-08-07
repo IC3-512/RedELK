@@ -228,7 +228,39 @@ def render_lists(cfg: config_module.Config, elkserver: Path, result: RenderResul
         )
         content += "".join(f"{value}\n" for value in values)
         target = base / filename
+        existing = _existing_list_entries(target)
         result.add(target, write_if_absent(target, content))
+
+        # Seeding only happens once, so an entry added to redelk.yml after the first install is
+        # silently ignored - the operator edits the file, reinstalls, and nothing happens. Say so
+        # rather than clobbering the list, which would discard whatever was added through Kibana.
+        if existing is None:
+            continue
+        missing = [str(value) for value in values if str(value) not in existing]
+        if missing:
+            shown = ", ".join(missing[:5]) + (
+                f" and {len(missing) - 5} more" if len(missing) > 5 else ""
+            )
+            result.warnings.append(
+                f"{target}: {len(missing)} entr{'y' if len(missing) == 1 else 'ies'} from "
+                f"redelk.yml {'is' if len(missing) == 1 else 'are'} not in this list ({shown}). "
+                f"The lists are only seeded when the file does not exist yet, because RedELK "
+                f"keeps them in sync with Elasticsearch and rewriting the file would discard "
+                f"entries added through Kibana. Add them in Kibana, or delete this file and run "
+                f"`redelkctl generate` to re-seed it from redelk.yml."
+            )
+
+
+def _existing_list_entries(path: Path) -> set[str] | None:
+    """The entries already in a seeded list file, or None when it does not exist yet."""
+    if not path.is_file():
+        return None
+    entries = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if entry:
+            entries.add(entry)
+    return entries
 
 
 def render_nginx(cfg: config_module.Config, elkserver: Path, result: RenderResult) -> None:

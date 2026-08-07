@@ -26,6 +26,7 @@ Authors:
 
 from __future__ import annotations
 
+import base64
 import copy
 import datetime
 import json
@@ -153,6 +154,26 @@ def match_domain_name(domain: str) -> re.Match | None:
         return domain_pattern.match(text.encode("idna").decode("ascii"))
     except (UnicodeError, UnicodeEncodeError, AttributeError):
         return None
+
+
+def xforce_authorization_header(credential: str) -> str:
+    """Build the IBM X-Force Authorization header from what redelk.yml carries.
+
+    api_keys.ibm_xforce is documented as either a ready-made "Basic <base64>" value or the raw
+    "<key>:<password>" pair, so both are accepted rather than one of them being sent as-is.
+
+    Shared, because it used to live only in the domain categorizer while alarm_filehash sent the
+    configured value straight through: the raw pair - one of the two documented forms - then 401'd
+    on every request, and which of your two X-Force integrations worked depended on which file you
+    happened to be looking at.
+    """
+    credential = (credential or "").strip()
+    if not credential:
+        return ""
+    if credential.lower().startswith("basic "):
+        return credential
+    encoded = base64.b64encode(credential.encode("utf-8")).decode("ascii")
+    return f"Basic {encoded}"
 
 
 def get_value(path: str, source: Any, default_value: Any = None) -> Any:

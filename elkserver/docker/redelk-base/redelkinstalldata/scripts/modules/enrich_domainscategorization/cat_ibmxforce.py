@@ -25,12 +25,11 @@ Authors:
 
 from __future__ import annotations
 
-import base64
 import logging
 
 import requests
 from config import enrich
-from modules.helpers import HTTP_TIMEOUT, get_value, now_iso
+from modules.helpers import HTTP_TIMEOUT, get_value, now_iso, xforce_authorization_header
 
 API_URL = "https://api.xforce.ibmcloud.com"
 
@@ -38,17 +37,8 @@ API_URL = "https://api.xforce.ibmcloud.com"
 FATAL_STATUS = (401, 402, 403, 429)
 
 
-def authorization_header(credential: str) -> str:
-    """Build the Authorization header from what redelk.yml carries.
-
-    api_keys.ibm_xforce is documented as either a ready-made "Basic <base64>" value or the raw
-    "<key>:<password>" pair, so both are accepted here rather than silently sending the pair.
-    """
-    credential = credential.strip()
-    if credential.lower().startswith("basic "):
-        return credential
-    encoded = base64.b64encode(credential.encode("utf-8")).decode("ascii")
-    return f"Basic {encoded}"
+# The single implementation both X-Force clients use; see modules/helpers.py.
+authorization_header = xforce_authorization_header
 
 
 class IBMXForce:
