@@ -136,6 +136,23 @@ All optional. `tests/e2e/conftest.py` is the reference.
 | `REDELK_E2E_FAKE_HOST` / `REDELK_E2E_FAKE_PORT` | Where the fake Mythic binds. Defaults to the docker bridge gateway of `redelk-base` and an ephemeral port. |
 | `REDELK_E2E=1` | Collect the tier without passing `-m e2e`. |
 
+### When the host and its containers cannot talk to each other
+
+Some hosts route traffic between the host and a docker bridge in a way that silently drops it -
+container to container is fine, host to container and back is not. Two parts of the tier notice:
+
+- The Elasticsearch and Kibana clients try the published port, and fall back to
+  `docker exec ... curl` on the first failure. Nothing to do; the run prints one line saying so.
+- The fake Mythic has to be reached *from* `redelk-base`, and there is no fallback for that - the
+  connector is the thing under test, so it has to make a real request. `seed_mythic` checks
+  reachability before it runs the daemon and fails immediately naming the cause, rather than
+  spending three minutes per fixture and then reporting "timed out waiting for Mythic documents",
+  which reads like a connector fault.
+
+Confirm it independently with `python3 -m http.server 9 --bind <the bridge gateway>` on the host
+and a `urllib.request.urlopen` from inside `redelk-base`. If some other address is reachable, put
+it in `REDELK_E2E_FAKE_HOST`. Running the tier in a VM is the other way out.
+
 ### Pointing it at an existing lab
 
 ```sh

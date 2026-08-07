@@ -320,7 +320,14 @@ def deployed_data_views(kibana) -> dict[str, str]:
 
 
 @pytest.fixture(scope="module")
-def counter(elasticsearch) -> PanelCounter:
+def counter(elasticsearch, seed_mythic, seed_redirector) -> PanelCounter:
+    """Counts panel aggregations, against a stack that is guaranteed to have been seeded.
+
+    The seeding fixtures are dependencies rather than an assumption about test order. Without
+    them, `pytest tests/e2e/test_dashboards.py` against a freshly installed stack reports every
+    one of the ~120 aggregations as empty, which reads like a catastrophic dashboard regression
+    and is really just "nobody put any data in yet".
+    """
     return PanelCounter(elasticsearch)
 
 

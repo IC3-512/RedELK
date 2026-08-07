@@ -1223,6 +1223,41 @@ class MythicSeed:
         return getattr(self.fake, name)
 
 
+def _require_fake_is_reachable(fake: Any) -> None:
+    """Fail now, with the reason, if redelk-base cannot reach the fake Mythic.
+
+    The connector's own timeout is 30s per request and the wait for documents is 180s, so a host
+    whose containers cannot reach the host end of their bridge network - which happens, and has
+    nothing to do with RedELK - otherwise costs minutes per seeded fixture and reports itself as
+    "timed out waiting for Mythic documents", pointing at the connector rather than at the network.
+    """
+    probe = docker(
+        "exec",
+        BASE_CONTAINER,
+        "python3",
+        "-c",
+        (
+            "import ssl,sys,urllib.request\n"
+            "ctx=ssl._create_unverified_context()\n"
+            f"urllib.request.urlopen('{fake.url}/graphql/', data=b'{{}}', timeout=15, context=ctx)"
+        ),
+        check=False,
+        timeout=60,
+    )
+    # Any HTTP answer means the socket is fine; the fake rejects that body, which is the point.
+    stderr = (probe.stderr or "") + (probe.stdout or "")
+    if "HTTPError" in stderr or probe.returncode == 0:
+        return
+    pytest.fail(
+        f"{BASE_CONTAINER} cannot reach the fake Mythic at {fake.url}.\n\n"
+        f"The fake binds on the host end of the container's bridge network, so this is a docker "
+        f"networking problem on this host, not a RedELK or connector fault - verify it with "
+        f"`python3 -m http.server 9 --bind <gateway>` and a urlopen from inside {BASE_CONTAINER}. "
+        f"Set {ENV_FAKE_HOST} to an address the container can reach if the gateway is not it.\n\n"
+        f"Probe said:\n{stderr.strip()[-800:]}"
+    )
+
+
 @pytest.fixture(scope="session")
 def seed_mythic(
     redelk_lab: Lab,
@@ -1247,6 +1282,7 @@ def seed_mythic(
     fake = _start_fake_mythic(bind_host, port)
 
     try:
+        _require_fake_is_reachable(fake)
         names: list[str] = []
         redelk_lab.edit_config(lambda doc: names.append(_point_mythic_at(doc, fake.url)))
         server_name = names[0]
