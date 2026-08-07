@@ -243,6 +243,22 @@ notifications:
     enabled: false
     # Microsoft retired Office 365 connectors; use a Power Automate "Workflows" webhook URL here.
     webhook_url: ""
+  # Hand the alarm to a Prometheus Alertmanager and let it do the deduplication, grouping,
+  # silences and on-call escalation you already configure there. RedELK sends one alert per alarm
+  # run; `alertname` is the alarm module, which is what you silence or route on.
+  alertmanager:
+    enabled: false
+    url: ""            # base URL, e.g. http://alertmanager:9093 - not the /api/v2/alerts path
+    labels: {}         # extra labels merged into every alert, e.g. {team: red, engagement: acme}
+    # ttl: 3600        # seconds before an unrepeated alert resolves itself
+  # One URL per destination, through Apprise (https://github.com/caronc/apprise): ntfy, Matrix,
+  # Gotify, Signal, Telegram, Pushover, Discord and many more. Useful when the alarm body - target
+  # hostnames, task output, credentials - should reach something you run rather than a SaaS chat.
+  apprise:
+    enabled: false
+    urls: []
+      # - "ntfy://ntfy.example.com/redelk"
+      # - "matrixs://redelk:password@matrix.example.com/#ops:example.com"
 
 ####################################################################################################
 # Threat intelligence / enrichment API keys

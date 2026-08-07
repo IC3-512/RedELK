@@ -194,6 +194,77 @@ with Workflows.)
 
 ---
 
+## Prometheus Alertmanager
+
+Use this if you already run an Alertmanager. RedELK sends the alarm and stops there; deduplication,
+grouping, repeat intervals, silences, inhibition and on-call escalation are Alertmanager's job and
+it does them better than a SIEM's notification module would.
+
+```yaml
+notifications:
+  alertmanager:
+    enabled: true
+    url: "http://alertmanager:9093"     # base URL, not the /api/v2/alerts path
+    labels: { team: red, engagement: acme }
+    # ttl: 3600
+```
+
+One alert is sent per alarm run, not per document - Alertmanager's model is that an alert is a
+condition with an identity, and seventeen alerts differing only in a source IP would be grouped
+back together anyway.
+
+| Label | Value |
+|---|---|
+| `alertname` | the alarm module, e.g. `alarm_httptraffic` - this is what you route and silence on |
+| `service` | always `redelk` |
+| `project` | `project.name` from redelk.yml |
+| anything in `labels` | merged in verbatim, with names made Prometheus-safe (`source.ip` -> `source_ip`) |
+
+The hit detail is in the `description` annotation, the count in `hits`.
+
+Every alert carries an explicit `endsAt` (default one hour, `ttl` to change it). RedELK reports
+observations, not conditions that are currently true, and without an end time Alertmanager would
+re-fire each one until told otherwise.
+
+Grafana's built-in Alertmanager-compatible endpoint accepts the same payload, so this also works if
+you use Grafana-managed alerting rather than a standalone Alertmanager.
+
+## Apprise
+
+[Apprise](https://github.com/caronc/apprise) speaks a hundred-odd services from a single URL - ntfy,
+Matrix, Gotify, Signal, Telegram, Pushover, Discord and the rest.
+
+```yaml
+notifications:
+  apprise:
+    enabled: true
+    urls:
+      - "ntfy://ntfy.example.com/redelk"
+      - "matrixs://redelk:password@matrix.example.com/#ops:example.com"
+```
+
+This sits beside the Slack, Teams and e-mail connectors rather than replacing them: those three
+render the alarm natively - Block Kit, an adaptive card, an HTML table - and Apprise carries a
+title and a plain-text body. What it buys is reach, and one thing that matters more for a red team
+than convenience: the alarm body contains target hostnames, task output and credentials, and
+sending that to an ntfy or Matrix server **you** run keeps it out of a SaaS chat the client never
+approved.
+
+Every configured URL is notified, and a failure of any one of them counts as a failed delivery -
+see below. Apprise URLs usually carry their credential inline; RedELK never logs one in full.
+
+## Testing a connector
+
+```sh
+sudo ./redelkctl notify test              # every enabled connector
+sudo ./redelkctl notify test --channel apprise
+```
+
+Sends a synthetic alarm through the connectors as the daemon would, from inside `redelk-base`, so
+what it exercises is the real code path with the real configuration. Without it the only way to
+learn that a webhook is wrong is to wait for a real alarm - and a misconfigured connector fails
+silently, which looks exactly like nothing having happened yet.
+
 ## How delivery failures are handled
 
 - Connectors are invoked one by one and **isolated**: a dead Teams webhook no longer stops the

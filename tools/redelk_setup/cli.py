@@ -23,7 +23,7 @@ from pathlib import Path
 from . import certs, render
 from . import config as config_module
 from . import doctor as doctor_module
-from .schema import C2_TYPES, ConfigError
+from .schema import C2_TYPES, NOTIFICATION_CHANNELS, ConfigError
 
 GREEN, YELLOW, RED, BLUE, BOLD, RESET = (
     "\033[32m",
@@ -152,7 +152,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
             print(f"    - {redir.name:<20} {redir.type}{state}")
 
     enabled_notifications = [
-        name for name in ("email", "slack", "msteams") if cfg.raw["notifications"][name]["enabled"]
+        name for name in NOTIFICATION_CHANNELS if cfg.raw["notifications"][name]["enabled"]
     ]
     print(f"  notifications     {', '.join(enabled_notifications) or 'none'}")
     return 0
@@ -331,6 +331,60 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return doctor_module.run(cfg, check_c2=not args.skip_c2, verbose=args.verbose)
 
 
+def cmd_notify_test(args: argparse.Namespace) -> int:
+    """Send a synthetic alarm through the enabled connectors.
+
+    Without this the only way to find out whether a webhook, an Alertmanager route or an Apprise
+    URL actually works is to wait for a real alarm - and the failure mode of a misconfigured
+    connector is silence, which is indistinguishable from "nothing has happened yet".
+    """
+    cfg = config_module.load(args.config, create_secrets=False)
+    notifications = cfg.raw["notifications"]
+    enabled = [name for name in NOTIFICATION_CHANNELS if notifications[name]["enabled"]]
+    if args.channel:
+        if args.channel not in NOTIFICATION_CHANNELS:
+            fail(f"unknown channel {args.channel!r}; one of: {', '.join(NOTIFICATION_CHANNELS)}")
+        if args.channel not in enabled:
+            warn(f"notifications.{args.channel} is not enabled in {cfg.path.name}")
+        enabled = [args.channel]
+    if not enabled:
+        warn("no notification connector is enabled - nothing to test")
+        return 1
+
+    heading("Sending a test alarm")
+    # Run inside redelk-base: that is where the connectors, their dependencies and the daemon's
+    # own configuration live, so this tests what the daemon would actually do rather than a
+    # reimplementation of it on the control node.
+    script = (
+        "import json,sys;"
+        "sys.path.insert(0,'/usr/share/redelk/bin');"
+        "import config;"
+        "from modules.helpers import get_initial_alarm_result;"
+        "import importlib;"
+        "alarm=get_initial_alarm_result();"
+        "alarm['info']={'name':'redelkctl notify test','submodule':'notify_test',"
+        "'alarmmsg':'This is a test alarm sent by redelkctl notify test.',"
+        "'description':'If you are reading this, the connector works.'};"
+        "alarm['fields']=['source.ip'];"
+        "alarm['hits']={'total':1,'hits':[{'_id':'test','_index':'redelk-test',"
+        "'_source':{'source':{'ip':'198.51.100.1'}}}]};"
+        "failed=0\n"
+        "for name in " + repr(enabled) + ":\n"
+        "    try:\n"
+        "        importlib.import_module('modules.%s.module' % name).Module().send_alarm(alarm)\n"
+        "        print('  ok       %s' % name)\n"
+        "    except Exception as error:\n"
+        "        failed+=1; print('  FAILED   %s: %s' % (name, error))\n"
+        "sys.exit(1 if failed else 0)\n"
+    )
+    code = run_compose(cfg, ["exec", "-T", "base", "python3", "-c", script], check=False)
+    if code:
+        warn("at least one connector could not deliver")
+    else:
+        info("every enabled connector delivered the test alarm")
+    return code
+
+
 def cmd_secrets(args: argparse.Namespace) -> int:
     cfg = config_module.load(args.config, create_secrets=False)
     if not cfg.secrets:
@@ -449,6 +503,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-c2", action="store_true", help="do not contact the C2 APIs")
     p.add_argument("-v", "--verbose", action="store_true")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("notify", help="notification connectors")
+    notify_sub = p.add_subparsers(dest="notify_command", required=True)
+    q = notify_sub.add_parser("test", help="send a test alarm through the enabled connectors")
+    q.add_argument("--channel", help="test only this connector")
+    q.set_defaults(func=cmd_notify_test)
 
     p = sub.add_parser("secrets", help="show the generated credentials")
     p.add_argument("--reveal", action="store_true", help="print the values in full")

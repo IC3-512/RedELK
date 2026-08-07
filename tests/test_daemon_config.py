@@ -35,7 +35,13 @@ def test_an_empty_config_still_yields_every_section(daemon_env):
     env = daemon_env({})
 
     assert env.config.alarms and env.config.enrich
-    assert set(env.config.notifications) == {"email", "slack", "msteams"}
+    assert set(env.config.notifications) == {
+        "email",
+        "slack",
+        "msteams",
+        "alertmanager",
+        "apprise",
+    }
     assert env.config.notifications["email"]["smtp"]["port"] == 25
     assert env.config.es_connection == ["https://redelk-elasticsearch:9200"]
     assert env.config.project_name == "redelk-project"

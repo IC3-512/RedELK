@@ -61,6 +61,13 @@ TLS_MODES = ("self-signed", "letsencrypt", "custom")
 PROFILES = ("full", "limited")
 MEMORY_MODES = ("auto", "manual")
 EMAIL_TLS_MODES = ("starttls", "ssl", "none")
+
+# Every notification connector shipped under scripts/modules/<name>/. Adding one here, plus its
+# defaults below and a module directory, is the whole of what a new connector needs - the daemon
+# discovers it by directory name and everything else loops over this.
+NOTIFICATION_CHANNELS = ("email", "slack", "msteams", "alertmanager", "apprise")
+# The subset configured with nothing but an https webhook URL.
+WEBHOOK_CHANNELS = ("slack", "msteams")
 LOGLEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # Names are used as filenames, container hostnames and Elasticsearch field values.
@@ -150,6 +157,12 @@ DEFAULTS: dict[str, Any] = {
         },
         "slack": {"enabled": False, "webhook_url": ""},
         "msteams": {"enabled": False, "webhook_url": ""},
+        # Hands the alarm to an Alertmanager, which is where deduplication, grouping, silences and
+        # on-call escalation belong if you already run one - RedELK does not reimplement them.
+        "alertmanager": {"enabled": False, "url": "", "labels": {}},
+        # One library, a hundred-odd services. Each entry is an Apprise URL, e.g.
+        # ntfy://host/topic, matrixs://user:pass@host/#room, gotify://host/token, tgram://...
+        "apprise": {"enabled": False, "urls": []},
     },
     "api_keys": {
         "virustotal": "",
@@ -563,12 +576,37 @@ def _validate_notifications(cfg: dict[str, Any], errors: list[str]) -> None:
                 "notifications are enabled"
             )
 
-    for channel in ("slack", "msteams"):
+    for channel in WEBHOOK_CHANNELS:
         conf = notifications[channel]
         if conf["enabled"] and not str(conf["webhook_url"]).startswith("https://"):
             errors.append(
                 f"notifications.{channel}.webhook_url: an https webhook URL is required when "
                 f"{channel} notifications are enabled"
+            )
+
+    _validate_notification_extras(notifications, errors)
+
+
+def _validate_notification_extras(notifications: dict[str, Any], errors: list[str]) -> None:
+    """The channels whose configuration is not a webhook URL."""
+    alertmanager = notifications["alertmanager"]
+    if alertmanager["enabled"]:
+        url = str(alertmanager["url"])
+        if not url.startswith(("http://", "https://")):
+            errors.append(
+                "notifications.alertmanager.url: the base URL of the Alertmanager is required "
+                "when alertmanager notifications are enabled, e.g. http://alertmanager:9093"
+            )
+        if not isinstance(alertmanager["labels"], dict):
+            errors.append("notifications.alertmanager.labels: expected a mapping of label -> value")
+
+    apprise = notifications["apprise"]
+    if apprise["enabled"]:
+        urls = apprise["urls"]
+        if not isinstance(urls, list) or not [u for u in urls if str(u).strip()]:
+            errors.append(
+                "notifications.apprise.urls: at least one Apprise URL is required when apprise "
+                "notifications are enabled (see https://github.com/caronc/apprise)"
             )
 
 

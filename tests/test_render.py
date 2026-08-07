@@ -182,7 +182,7 @@ def test_daemon_config_round_trips_through_the_daemon_loader(
     for name in schema.ENRICH_MODULES:
         assert f"enrich_{name}" in env.config.enrich
         assert "enabled" in env.config.enrich[f"enrich_{name}"]
-    for channel in ("email", "slack", "msteams"):
+    for channel in schema.NOTIFICATION_CHANNELS:
         assert "enabled" in env.config.notifications[channel]
 
 

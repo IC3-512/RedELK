@@ -529,6 +529,15 @@ def as_daemon_config(config: Config) -> dict[str, Any]:
                 "enabled": notifications["slack"]["enabled"],
                 "webhook_url": notifications["slack"]["webhook_url"],
             },
+            "alertmanager": {
+                "enabled": notifications["alertmanager"]["enabled"],
+                "url": notifications["alertmanager"]["url"],
+                "labels": dict(notifications["alertmanager"]["labels"] or {}),
+            },
+            "apprise": {
+                "enabled": notifications["apprise"]["enabled"],
+                "urls": list(notifications["apprise"]["urls"] or []),
+            },
         },
         "alarms": {
             "alarm_filehash": alarm(

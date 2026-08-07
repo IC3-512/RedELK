@@ -49,6 +49,8 @@ DEFAULTS: dict[str, Any] = {
         },
         "msteams": {"enabled": False, "webhook_url": ""},
         "slack": {"enabled": False, "webhook_url": ""},
+        "alertmanager": {"enabled": False, "url": "", "labels": {}},
+        "apprise": {"enabled": False, "urls": []},
     },
     "alarms": {
         "alarm_filehash": {

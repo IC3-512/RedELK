@@ -33,7 +33,7 @@ from typing import Any
 
 from . import certs
 from . import config as config_module
-from .schema import C2_TYPES, ConfigError
+from .schema import C2_TYPES, NOTIFICATION_CHANNELS, ConfigError
 
 GREEN, YELLOW, RED, RESET, BOLD = "\033[32m", "\033[33m", "\033[31m", "\033[0m", "\033[1m"
 
@@ -604,7 +604,7 @@ def _check_certificates(cfg: config_module.Config, report: Report) -> None:
 
 def _check_notifications(cfg: config_module.Config, report: Report) -> None:
     notifications = cfg.raw["notifications"]
-    enabled = [name for name in ("email", "slack", "msteams") if notifications[name]["enabled"]]
+    enabled = [name for name in NOTIFICATION_CHANNELS if notifications[name]["enabled"]]
     if not enabled:
         report.add(
             "notifications",
