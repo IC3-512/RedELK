@@ -1,0 +1,179 @@
+name: Validate
+
+# Checks the artefacts that make a RedELK v3 deployment work: the configuration schema, the
+# Elasticsearch/Kibana assets the bootstrap loads, and the Logstash pipeline.
+on:
+  push:
+    branches:
+      - master
+      - develop
+      - "feat/**"
+      - "fix/**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deliverables:
+    name: Configuration and assets
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install redelkctl dependencies
+        run: python -m pip install --disable-pip-version-check -r tools/requirements.txt
+
+      - name: Byte-compile every Python file
+        run: |
+          python -m compileall -q tools
+          python -m compileall -q elkserver/docker/redelk-base/redelkinstalldata/scripts
+
+      - name: Validate the shipped example configuration
+        run: ./redelkctl --config redelk.yml.example validate
+
+      - name: Validate the CI fixture
+        run: ./redelkctl --config .github/fixtures/redelk.ci.yml validate
+
+      - name: Validate the Elasticsearch and Kibana assets
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path("elkserver/docker/redelk-base/redelkinstalldata/templates")
+          failures = []
+          checked = 0
+
+          for path in sorted(root.rglob("*")):
+              if not path.is_file():
+                  continue
+              if path.suffix not in (".json", ".ndjson"):
+                  failures.append(f"{path}: not a .json or .ndjson asset")
+                  continue
+              checked += 1
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except UnicodeDecodeError as error:
+                  failures.append(f"{path}: {error}")
+                  continue
+              if path.suffix == ".ndjson":
+                  # Kibana saved-object exports are one JSON document per line.
+                  for number, line in enumerate(text.splitlines(), start=1):
+                      if not line.strip():
+                          continue
+                      try:
+                          json.loads(line)
+                      except json.JSONDecodeError as error:
+                          failures.append(f"{path}:{number}: {error}")
+              else:
+                  try:
+                      json.loads(text)
+                  except json.JSONDecodeError as error:
+                      failures.append(f"{path}: {error}")
+
+          print(f"checked {checked} asset files")
+          for failure in failures:
+              print(f"::error file={failure.split(':')[0]}::{failure}")
+          sys.exit(1 if failures else 0)
+          PY
+
+  logstash:
+    name: Logstash pipeline
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Pin the image to whatever redelk.yml.example ships, so the pipeline is always tested
+      # against the version operators actually deploy.
+      - name: Read the pinned Elastic version
+        id: elastic
+        run: |
+          python -m pip install --disable-pip-version-check --quiet pyyaml
+          version=$(python -c \
+            "import yaml; print(yaml.safe_load(open('redelk.yml.example'))['elastic']['version'])")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The beats input and the elasticsearch output declare their certificate settings as paths,
+      # so Logstash refuses the configuration unless the files exist - even with test_and_exit.
+      - name: Generate throwaway certificates
+        run: |
+          mkdir -p "${RUNNER_TEMP}/certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj "/CN=redelk-configtest" \
+            -keyout "${RUNNER_TEMP}/certs/logstash.key" \
+            -out "${RUNNER_TEMP}/certs/logstash.crt"
+          cp "${RUNNER_TEMP}/certs/logstash.crt" "${RUNNER_TEMP}/certs/ca.crt"
+          chmod -R a+r "${RUNNER_TEMP}/certs"
+
+      - name: Test the pipeline configuration
+        env:
+          ELASTIC_VERSION: ${{ steps.elastic.outputs.version }}
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/elkserver/mounts/logstash-config/redelk-main:/usr/share/logstash/redelk-main:ro" \
+            -v "${RUNNER_TEMP}/certs:/certs:ro" \
+            -e CERTS_LOGSTASH_INPUT_CRT=/certs/logstash.crt \
+            -e CERTS_LOGSTASH_INPUT_KEY=/certs/logstash.key \
+            -e CERTS_LOGSTASH_INPUT_CA=/certs/ca.crt \
+            -e CERTS_LOGSTASH_OUTPUT_CA=/certs/ca.crt \
+            -e LOGSTASH_CLIENT_AUTH=required \
+            -e CREDS_redelk_ingest=configtest \
+            "docker.elastic.co/logstash/logstash:${ELASTIC_VERSION}" \
+            logstash \
+              --path.config /usr/share/logstash/redelk-main/conf.d \
+              --log.level warn \
+              --config.test_and_exit
+
+  secrets:
+    name: No secret material
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # RedELK generates its own CA. Nothing that a deployment generates belongs in git, and a
+      # single leaked CA key is enough to impersonate the whole collection infrastructure.
+      - name: Reject key material and generated secrets
+        run: |
+          git ls-files -- \
+            '*.key' '*.pem' '*.p12' '*.pfx' '*.jks' '*.keystore' \
+            'id_rsa' 'id_ecdsa' 'id_ed25519' '*/id_rsa' '*/id_ecdsa' '*/id_ed25519' \
+            'redelk.secrets.yml' '*/redelk.secrets.yml' \
+            'redelk_passwords.cfg' '*/redelk_passwords.cfg' \
+            '.env' '*/.env' > "${RUNNER_TEMP}/matches.txt"
+          if [ -s "${RUNNER_TEMP}/matches.txt" ]; then
+            echo "::error::secret material must never be committed:"
+            sed 's/^/  /' "${RUNNER_TEMP}/matches.txt"
+            exit 1
+          fi
+          echo "no key material or generated secrets are tracked"
+
+      - name: Reject inline private keys
+        run: |
+          if git grep -I -l -E -e '-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----' \
+               -- . ':(exclude).github/workflows/validate.yml' > "${RUNNER_TEMP}/keys.txt"; then
+            echo "::error::these files contain a private key:"
+            sed 's/^/  /' "${RUNNER_TEMP}/keys.txt"
+            exit 1
+          fi
+          echo "no private keys found in tracked files"

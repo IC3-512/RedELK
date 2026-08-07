@@ -5,11 +5,16 @@
 # Author: Outflank B.V. / Marc Smeets
 #
 
-
 def filter(event)
 	host = event.get("[agent][name]")
 	filename = event.get("[file][name]")
 	file_path = event.get("[file][directory_local]")
+
+	if host.nil? || filename.nil? || file_path.nil?
+		event.tag("_rubyparsefailure")
+		return [event]
+	end
+
 	downloadsurl = "/c2logs/" + "#{host}" + "/stage1/downloads/" + "#{file_path}" + "_" + "#{filename}"
 	event.tag("_rubyparseok")
 	event.set("[file][url]", downloadsurl)

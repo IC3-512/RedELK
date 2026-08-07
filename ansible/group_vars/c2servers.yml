@@ -1,0 +1,22 @@
+---
+####################################################################################################
+# C2 servers.
+#
+# Which C2 framework runs here, where its logs are and what gets shipped is decided by the matching
+# c2_servers entry in ../redelk.yml. Ansible only copies build/packages/<name>/ here and runs the
+# installer that redelkctl put in it.
+#
+# Only file-based C2 servers (cobaltstrike, poshc2, sliver, outflankstage1) get a package.
+# API-based ones (mythic, outflankc2) are polled by the RedELK server itself and must NOT be in
+# this inventory group: there is nothing to install on them.
+####################################################################################################
+
+# The package to install: build/packages/<redelk_package_name>/. The inventory host name is what
+# ties an inventory entry to redelk.yml; override it per host only when they cannot be the same.
+redelk_package_name: "{{ inventory_hostname }}"
+
+# Extra flags for the generated installer, for example:
+#   ["--dry-run"]       show what it would change
+#   ["--no-filebeat"]   write the configuration but do not install or start filebeat
+#   ["--uninstall"]     remove what a previous run installed
+redelk_client_install_args: []

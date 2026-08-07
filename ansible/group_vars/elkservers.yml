@@ -1,0 +1,17 @@
+---
+####################################################################################################
+# The RedELK server.
+#
+# Its profile, hostnames, TLS mode, memory and every other setting come from ../redelk.yml. Only
+# the things Ansible needs in order to reach and prepare the host live here.
+####################################################################################################
+
+# Install Docker Engine from Docker's own repository before deploying. Set to false when the host
+# already runs Docker and you do not want Ansible to touch it.
+redelk_install_docker: true
+
+# Extra flags for './redelkctl install' on the server, for example:
+#   ["--pull"]            always pull the newest images
+#   ["--generate-only"]   write the configuration but do not start the containers
+#   ["--no-sysctl"]       do not touch vm.max_map_count
+redelk_install_args: []

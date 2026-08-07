@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT-0
+---
+# Docker publishes one apt repository per distribution, and the only per-release input is the
+# suite/codename. https://docs.docker.com/engine/install/
+docker_supported_releases:
+  Ubuntu:
+    - focal # EOL, kept because RedELK deployments still run on it
+    - jammy
+    - noble
+    - questing
+    - resolute
+  Debian:
+    - bullseye
+    - bookworm
+    - trixie
+
+docker_apt_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+  armv7l: armhf
+  ppc64le: ppc64el

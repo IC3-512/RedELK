@@ -1,0 +1,216 @@
+####################################################################################################
+#
+#  RedELK configuration for the end-to-end test tier (tests/e2e).
+#
+#  This is a real redelk.yml - `./redelkctl --config tests/e2e/fixtures/redelk.e2e.yml validate`
+#  must pass, and the e2e run installs the stack from it. That is deliberate: the suite doubles as
+#  an installation test, so anything special-cased here would be a code path no test covers.
+#
+#  tests/e2e/conftest.py copies this file to a working directory and installs from the copy, then
+#  rewrites the Mythic server's api.url and api.token to point at fake_mythic.py, which binds an
+#  ephemeral port. The URL below is therefore only a placeholder that keeps the file valid on its
+#  own. Nothing here is a real address or a real credential.
+#
+####################################################################################################
+
+version: 3
+
+project:
+  name: redelk-e2e
+  # Every seeded document carries this, so a test can tell fixture data from anything an operator
+  # left behind in a lab cluster the suite was pointed at.
+  attack_scenario: e2e
+
+####################################################################################################
+# RedELK server
+####################################################################################################
+server:
+  # The names the beats certificate is issued for. `redelk-logstash` is the container name on the
+  # compose network, which is what a Filebeat container joined to that network connects to;
+  # `localhost` plus the 127.0.0.1 SAN below cover a Filebeat that reaches the published port on
+  # the host instead. Both have to be present, because which one the harness uses depends on how
+  # it starts the shipper.
+  hostnames:
+    - localhost
+    - redelk-logstash
+  ips:
+    - 127.0.0.1
+
+  # No Jupyter, no BloodHound: neither is exercised by the suite, and the full profile needs 8GB
+  # of RAM that a CI runner does not have.
+  profile: limited
+
+  ingest_host: redelk-logstash
+  ingest_port: 5044
+
+  # A GitHub-hosted runner has 16GB and shares it with Kibana (~1GB), Logstash (1GB fixed in
+  # docker-compose.yml) and the test process. `auto` would size the heap from the host and hand
+  # Elasticsearch far more than a single-node cluster holding a few hundred documents needs.
+  memory:
+    mode: manual
+    elasticsearch_heap: 1200m
+    neo4j_heap: "" # unused on the limited profile
+
+  bind:
+    kibana: 127.0.0.1
+    elasticsearch: 127.0.0.1
+    neo4j: 127.0.0.1
+    bloodhound: 127.0.0.1
+
+  ports:
+    http: 80
+    https: 443
+    bloodhound: 8443
+
+  tls:
+    mode: self-signed
+    ca_validity_days: 3650
+    cert_validity_days: 825
+    # The point of test_ingest_redirector.py: the sample traffic has to travel over the same
+    # mutually authenticated beats connection a real redirector uses. With this off, a broken
+    # client certificate would still deliver documents and the test would pass.
+    mutual_auth: true
+
+####################################################################################################
+# Elastic stack
+####################################################################################################
+elastic:
+  # Keep in sync with redelk.yml.example: the e2e tier is only useful if it tests the version
+  # operators actually deploy.
+  version: "9.5.0"
+  image_repo: outflanknl
+  image_tag: ""
+  # redelk-base carries the daemon, the C2 connectors and the Elasticsearch/Kibana provisioning
+  # that this suite is about, so it is built from the working copy. Pulling the published image
+  # would test the last release instead of the branch - and there is no published image for a
+  # version that has not been released yet.
+  build_local: true
+  retention:
+    hot_days: 30
+    delete_days: 365
+
+####################################################################################################
+# C2 servers
+#
+# One API-based Mythic server, served by tests/e2e/fake_mythic.py replaying the recorded responses
+# in tests/e2e/fixtures/mythic_v4.json. plain http + verify_tls: false because the fake speaks
+# http; the schema rejects http with verify_tls left on, which is exactly the warning an operator
+# should get for a real server.
+####################################################################################################
+c2_servers:
+  - name: mythic1
+    type: mythic
+    attack_scenario: e2e
+    api:
+      url: http://127.0.0.1:17443 # rewritten by conftest.py at runtime
+      token: e2e-fixture-token
+      username: ""
+      password: ""
+      verify_tls: false
+      # Seconds between polls of this server. The idempotency test polls twice in quick
+      # succession and needs the second poll to actually happen rather than be skipped.
+      poll_interval: 1
+      download_files: true
+      max_file_size: 104857600
+
+####################################################################################################
+# Redirectors
+####################################################################################################
+redirectors:
+  - name: redir1
+    type: haproxy
+    attack_scenario: e2e
+
+####################################################################################################
+# Notifications
+#
+# All off. The daemon still records alarms in Elasticsearch when no connector is enabled (see
+# daemon.notify), which is what test_ingest_redirector.py asserts on - and a test suite that
+# delivers e-mail or Slack messages is a test suite nobody runs twice.
+####################################################################################################
+notifications:
+  email:
+    enabled: false
+    to: []
+  slack:
+    enabled: false
+    webhook_url: ""
+  msteams:
+    enabled: false
+    webhook_url: ""
+
+####################################################################################################
+# API keys
+#
+# None. Every module that needs one is disabled below, so the suite never talks to a third party.
+####################################################################################################
+api_keys:
+  virustotal: ""
+  ibm_xforce: ""
+  hybrid_analysis: ""
+  greynoise: ""
+
+####################################################################################################
+# Alarm and enrichment modules
+#
+# The intervals are seconds and are all cut to 1: the suite runs the daemon by hand, several times,
+# within the same minute. With the shipped 300+ second intervals module_should_run() would skip
+# every module after the first run and the alarm assertions would depend on how long the previous
+# test happened to take.
+####################################################################################################
+modules:
+  interval: 60
+  # INFO, not the shipped WARNING: the daemon's own progress lines ("loaded N enrichment ...",
+  # "Mythic mythic1: ... (N documents)") are what a failing e2e run is diagnosed from.
+  loglevel: INFO
+
+  alarms:
+    filehash: { enabled: false, interval: 1 }
+    httptraffic: { enabled: true, interval: 1, notify_interval: 1 }
+    useragent: { enabled: true, interval: 1 }
+    backendalarm: { enabled: true, interval: 1 }
+    manual: { enabled: false, interval: 1 }
+    dummy: { enabled: false, interval: 1 }
+
+  enrich:
+    csbeacon: { enabled: true, interval: 1 }
+    stage1: { enabled: true, interval: 1 }
+    sliver: { enabled: true, interval: 1 }
+    mythic: { enabled: true, interval: 1 }
+    # No Outflank C2 server is configured, so the module has nothing to poll; leaving it on keeps
+    # it importable-and-runnable, which is a cheap check of its own.
+    outflankc2: { enabled: true, interval: 1 }
+    ttp: { enabled: true, interval: 1 }
+    greynoise: { enabled: false, interval: 1, cache: 86400 }
+    # Off on purpose: this one downloads the Tor exit node list. An e2e run must not depend on
+    # reachability of a third party, and a runner without egress would fail for the wrong reason.
+    tor: { enabled: false, interval: 1, cache: 3600 }
+    iplists: { enabled: true, interval: 1 }
+    synciplists: { enabled: true, interval: 1 }
+    syncdomainslists: { enabled: true, interval: 1 }
+    domainscategorization: { enabled: false, interval: 1 }
+
+####################################################################################################
+# Known-infrastructure lists
+#
+# These seed /etc/redelk/*.conf, but only when the file does not exist yet (render.render_lists
+# uses write_if_absent, because RedELK keeps the lists in sync with Elasticsearch at runtime). A
+# local checkout that has already run a different configuration therefore keeps its old lists -
+# see docs/testing.md for how to reset them.
+####################################################################################################
+lists:
+  redteam_ips: []
+  customer_ips: []
+  blueteam_ips: []
+  redteam_domains: []
+  rogue_domains: []
+  # alarm_useragent matches these as substrings of http.headers.useragent, and
+  # test_ingest_redirector.py builds its rogue request from the first entry of the list that ended
+  # up in /etc/redelk/rogue_useragents.conf. 'masscan' is what the recorded sample traffic in
+  # example-data-and-configs/ExampleData/redirb1_haproxy.log actually contains; 'curl' is what an
+  # operator reaches for first when testing a redirector by hand, and is also in the shipped
+  # default list, so the alarm still has something to fire on when this file loses the race
+  # against an older /etc/redelk/rogue_useragents.conf (see docs/testing.md).
+  rogue_useragents:
+    - masscan
+    - curl

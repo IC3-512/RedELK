@@ -1,0 +1,91 @@
+{
+  "template": {
+    "mappings": {
+      "properties": {
+        "domainslist": {
+          "properties": {
+            "categorization": {
+              "properties": {
+                "categories": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "categories_str": {
+                  "type": "keyword",
+                  "ignore_above": 1024,
+                  "fields": {
+                    "text": {
+                      "type": "text",
+                      "norms": false
+                    }
+                  }
+                },
+                "engines": {
+                  "type": "flattened"
+                },
+                "old": {
+                  "type": "flattened"
+                }
+              }
+            },
+            "comment": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
+            },
+            "domain": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "name": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "source": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        },
+        "iplist": {
+          "properties": {
+            "comment": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
+            },
+            "ip": {
+              "type": "ip_range"
+            },
+            "name": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "source": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "managed_by": "redelk",
+    "description": "The known-infrastructure lists RedELK keeps in Elasticsearch: iplist.* as written by modules/enrich_synciplists and modules/enrich_tor, domainslist.* as written by modules/enrich_syncdomainslists and enriched by modules/enrich_domainscategorization. Shared by redelk-iplist-*, redelk-domainslist-* and bluecheck-*, because a domain categorization change is also recorded as a bluecheck document. iplist.ip is an ip_range: the sync module normalises every entry to CIDR so that modules/enrich_iplists can ask 'does this visitor IP fall in one of our ranges' with a single term query. categorization.engines holds one sub-object per vendor and categorization.old a full copy of the previous verdict; both are flattened so arbitrary vendor response bodies cannot blow up the field count.",
+    "authors": [
+      "Outflank B.V. / Mark Bergman (@xychix)",
+      "Lorenzo Bernardi (@fastlorenzo)"
+    ]
+  }
+}

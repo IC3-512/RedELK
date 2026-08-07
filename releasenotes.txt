@@ -1,6 +1,11 @@
 
 RedELK release notes
 
+### MOVED
+
+Release notes for RedELK v3.0.0 and later live in CHANGELOG.md in the root of this repository.
+This file is kept for the history of v2 and earlier and is no longer updated.
+
 ### version 2.0.0 BETA6
 * New alarm: alarm when traffic is hit to any redir backend that has 'alarm' in it. Allows for flexibility in smarter redir logic.
 * Chained X-Forwarded-For IPs are now also stored, in field source.ip_otherproxies in redirtraffic index

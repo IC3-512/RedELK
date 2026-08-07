@@ -3,148 +3,240 @@
 """
 Part of RedELK
 
-This check queries Hybrid Analysis API given a list of md5 hashes.
+This check queries the Hybrid Analysis (Falcon Sandbox) API given a list of md5 hashes.
+
+The public API is limited to 2000 requests per hour and a rate of 200 requests per minute.
+
+Fixes over v2, both of which meant the alarm never worked:
+  * the hash search posted to www.hybrid-analysis.com, which 301-redirects to the apex host.
+    requests turns a redirected POST into a GET and drops the body, so Hybrid Analysis was asked
+    to search for nothing. The request now goes to the apex host with allow_redirects=False, so a
+    redirect is reported instead of silently changing the request.
+  * the result of a successful search - an already decoded list of report objects - was handed to
+    helpers.is_json(), which only accepts strings. Every hash that Hybrid Analysis did know about
+    therefore fell through to `continue`... after which the alarm module crashed on the missing
+    entry. Now the decoded value is type checked directly.
 
 Authors:
 - Outflank B.V. / Mark Bergman (@xychix)
 - Lorenzo Bernardi (@fastlorenzo)
+- RedELK contributors
 """
+
 import json
 import logging
-from datetime import datetime
 
 import requests
 from dateutil import parser
-from modules.helpers import get_value, is_json
+from modules.helpers import HTTP_TIMEOUT, get_value
 
-# The Public API is limited to 2000 requests per hour and a rate of 200 requests per minute.
+# The apex host. https://www.hybrid-analysis.com/... answers 301 to this one.
+API_ROOT = "https://hybrid-analysis.com/api/v2"
+
+# Hybrid Analysis documents this exact user agent as a requirement for API access.
+USER_AGENT = "Falcon Sandbox"
+
+# Used when the quota endpoint cannot be read; far below the documented 200 requests per minute.
+DEFAULT_BUDGET = 20
+
+RESULT_ALARM = "newAlarm"
+RESULT_CLEAN = "clean"
+RESULT_QUOTA = "skipped, quota reached"
+RESULT_ERROR = "error"
 
 
 class HA:
     """This check queries Hybrid Analysis API given a list of md5 hashes."""
 
     def __init__(self, api_key):
-        self.report = {}
-        self.report["source"] = "Hybrid Analysis"
-        self.logger = logging.getLogger("ioc_hybridanalysis")
-        self.api_key = api_key
+        self.report = {"source": "Hybrid Analysis"}
+        self.logger = logging.getLogger("alarm_filehash.ioc_hybridanalysis")
+        self.api_key = api_key or ""
+        self.enabled = bool(self.api_key)
+
+    @property
+    def _headers(self):
+        return {
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+            "api-key": self.api_key,
+        }
 
     def get_remaining_quota(self):
         """Returns the number of hashes that could be queried within this run"""
-        url = "https://www.hybrid-analysis.com/api/v2/key/current"
-        headers = {
-            "Accept": "application/json",
-            "User-Agent": "RedELK",
-            "api-key": self.api_key,
-        }
+        url = f"{API_ROOT}/key/current"
 
-        # Get the quotas, if response code != 200, return 0 so we don't query further
-        response = requests.get(url, headers=headers)
+        try:
+            response = requests.get(url, headers=self._headers, timeout=HTTP_TIMEOUT)
+        except requests.RequestException as error:
+            self.logger.warning(
+                "could not reach Hybrid Analysis to read the quota (%s); allowing %d lookup(s) "
+                "this run",
+                error,
+                DEFAULT_BUDGET,
+            )
+            return DEFAULT_BUDGET
+
         if response.status_code != 200:
             self.logger.warning(
-                "Error retrieving Hybrid Analysis Quota (HTTP Status code: %d)",
+                "error retrieving the Hybrid Analysis quota (HTTP status code: %d)",
                 response.status_code,
             )
             return 0
 
+        # The quota lives in a response header, which is not always present.
         api_limits_json = response.headers.get("api-limits")
-        api_limits = json.loads(api_limits_json)
+        if not api_limits_json:
+            self.logger.debug("Hybrid Analysis did not report any limits; using the default budget")
+            return DEFAULT_BUDGET
 
-        # First check if the limit has been reached
-        limit_reached = get_value("limit_reached", api_limits, False)
-        if limit_reached:
+        try:
+            api_limits = json.loads(api_limits_json)
+        except (ValueError, TypeError):
+            self.logger.warning("could not parse the Hybrid Analysis api-limits header")
+            return DEFAULT_BUDGET
+
+        if get_value("limit_reached", api_limits, False):
+            self.logger.warning("Hybrid Analysis quota is exhausted; skipping the checks this run")
             return 0
 
-        # Extract the limits and usage
-        limits_minute = get_value("limits.minute", api_limits, 0)
-        limits_hour = get_value("limits.hour", api_limits, 0)
-        used_minute = get_value("used.minute", api_limits, 0)
-        used_hour = get_value("used.hour", api_limits, 0)
-
-        remaining_minute = limits_minute - used_minute
-        remaining_hour = limits_hour - used_hour
+        try:
+            remaining_minute = int(get_value("limits.minute", api_limits, 0)) - int(
+                get_value("used.minute", api_limits, 0)
+            )
+            remaining_hour = int(get_value("limits.hour", api_limits, 0)) - int(
+                get_value("used.hour", api_limits, 0)
+            )
+        except (TypeError, ValueError):
+            self.logger.warning(
+                "unexpected Hybrid Analysis limits format; using the default budget"
+            )
+            return DEFAULT_BUDGET
 
         self.logger.debug(
-            "Remaining quotas: hour(%d) / minute(%d)", remaining_hour, remaining_minute
+            "remaining Hybrid Analysis quota: hour(%d) / minute(%d)",
+            remaining_hour,
+            remaining_minute,
         )
-
-        # Return the remaining quota per minute
-        return remaining_minute
+        return max(0, min(remaining_minute, remaining_hour))
 
     def get_ha_file_results(self, filehash):
-        """Queries Hybrid Analysis API with file hash and returns the results or None if error / nothing found"""
+        """Search one hash. Returns (status, payload) with status in found/notfound/quota/error."""
+        url = f"{API_ROOT}/search/hash"
 
-        url = "https://www.hybrid-analysis.com/api/v2/search/hash"
-        headers = {
-            "Accept": "application/json",
-            "api-key": self.api_key,
-            "User-Agent": "RedELK",
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        payload = f"hash={filehash}"
-
-        # Search for the file hash
-        response = requests.post(url, headers=headers, data=payload)
-        if response.status_code == 200:  # Hash found
-            json_response = response.json()
-        else:  # Unexpected result
-            self.logger.warning(
-                "Error retrieving VT File hash results (HTTP Status code: %d): %s",
-                response.status_code,
-                response.text,
+        try:
+            # allow_redirects=False on purpose: requests rewrites a redirected POST into a body
+            # less GET, which is how this call silently stopped searching for anything.
+            response = requests.post(
+                url,
+                headers=self._headers,
+                data={"hash": filehash},
+                timeout=HTTP_TIMEOUT,
+                allow_redirects=False,
             )
-            # json_response = response.text
-            json_response = []  # see lione 106 checking for len 0.
-        return json_response
+        except requests.RequestException as error:
+            self.logger.warning("could not reach Hybrid Analysis: %s", error)
+            return "error", None
+
+        if response.is_redirect:
+            self.logger.error(
+                "Hybrid Analysis redirected the hash search to %s; refusing to follow it with a "
+                "body less request",
+                response.headers.get("location", "an unknown location"),
+            )
+            return "error", None
+
+        if response.status_code == 429:
+            return "quota", None
+
+        if response.status_code != 200:
+            self.logger.warning(
+                "error retrieving Hybrid Analysis file hash results (HTTP status code: %d)",
+                response.status_code,
+            )
+            return "error", None
+
+        try:
+            payload = response.json()
+        except ValueError:
+            self.logger.warning("Hybrid Analysis returned a non-JSON result for a file hash")
+            return "error", None
+
+        # A hash Hybrid Analysis never saw yields an empty list.
+        if isinstance(payload, list):
+            return ("found", payload) if payload else ("notfound", None)
+        if isinstance(payload, dict):
+            return "found", [payload]
+
+        self.logger.warning("unexpected Hybrid Analysis result type: %s", type(payload).__name__)
+        return "error", None
+
+    def _summarise(self, reports):
+        """The part of a Hybrid Analysis result worth storing on the document."""
+        first_analysis = None
+        verdicts = set()
+        threat_score = None
+        sha256 = None
+
+        for report in reports:
+            if not isinstance(report, dict):
+                continue
+            started = get_value("analysis_start_time", report)
+            if started:
+                try:
+                    parsed = parser.isoparse(started)
+                except (ValueError, TypeError):
+                    parsed = None
+                if parsed and (first_analysis is None or parsed < first_analysis):
+                    first_analysis = parsed
+            verdict = get_value("verdict", report)
+            if verdict:
+                verdicts.add(verdict)
+            score = get_value("threat_score", report)
+            if isinstance(score, int) and (threat_score is None or score > threat_score):
+                threat_score = score
+            sha256 = sha256 or get_value("sha256", report)
+
+        summary = {
+            "result": RESULT_ALARM,
+            # None rather than "now": an analysis without a start time tells us nothing, and v2
+            # recorded the current time for it, which read as "submitted seconds ago".
+            "first_submitted": first_analysis.isoformat() if first_analysis else None,
+            "submissions": len(reports),
+            "verdicts": sorted(verdicts),
+            "threat_score": threat_score,
+        }
+        if sha256:
+            summary["link"] = f"https://hybrid-analysis.com/sample/{sha256}"
+        return summary
 
     def test(self, hash_list):
         """run the query and build the report (results)"""
+        if not self.enabled:
+            self.logger.info("no Hybrid Analysis API key configured, skipping")
+            return {}
 
-        # Get the remaining quota for this run
         remaining_quota = self.get_remaining_quota()
+        self.logger.debug("checking %d hash(es), budget %d", len(hash_list), remaining_quota)
 
         ha_results = {}
-        # Query HA API for file hashes
-        count = 0
         for md5 in hash_list:
-            if count < remaining_quota:
-                # Within quota, let's check the file hash with HA
-                ha_result = self.get_ha_file_results(md5)
+            if remaining_quota <= 0:
+                ha_results[md5] = {"result": RESULT_QUOTA}
+                continue
 
-                # No results, let's return it clean
-                if len(ha_result) == 0:
-                    ha_results[md5] = {"result": "clean"}
-                elif is_json(ha_result):
-                    # Loop through the results to get the first analysis (submission) date
-                    first_analysis_time = datetime.utcnow()
-                    for result in ha_result:
-                        analysis_start_time = get_value(
-                            "analysis_start_time", result, None
-                        )
-                        if analysis_start_time is not None:
-                            analysis_start_time_date = parser.isoparse(
-                                analysis_start_time
-                            ).replace(tzinfo=None)
-                            first_analysis_time = (
-                                first_analysis_time
-                                if first_analysis_time < analysis_start_time_date
-                                else analysis_start_time_date
-                            )
-                    # Found
-                    ha_results[md5] = {
-                        "record": ha_result,
-                        "result": "newAlarm",
-                        "first_submitted": first_analysis_time.isoformat(),
-                        # TO-DO: loop through the submissions to get the time 'last_seen'
-                    }
-                else:
-                    # some horrible error
-                    # implement logging here
-                    continue
+            status, payload = self.get_ha_file_results(md5)
+            remaining_quota -= 1
 
+            if status == "quota":
+                self.logger.warning("Hybrid Analysis quota reached, skipping the remaining hashes")
+                remaining_quota = 0
+                ha_results[md5] = {"result": RESULT_QUOTA}
+            elif status == "found":
+                ha_results[md5] = self._summarise(payload)
+            elif status == "notfound":
+                ha_results[md5] = {"result": RESULT_CLEAN}
             else:
-                # Quota reached, skip the check
-                ha_results[md5] = {"result": "skipped, quota reached"}
-            count += 1
+                ha_results[md5] = {"result": RESULT_ERROR}
 
         return ha_results

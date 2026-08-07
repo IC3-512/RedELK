@@ -1,0 +1,56 @@
+{
+  "template": {
+    "mappings": {
+      "dynamic_templates": [
+        {
+          "redelk_alarm_module_data": {
+            "path_match": "alarm.alarm_*",
+            "match_mapping_type": "object",
+            "mapping": {
+              "type": "flattened"
+            }
+          }
+        }
+      ],
+      "properties": {
+        "alarm": {
+          "properties": {
+            "last_alarmed": {
+              "type": "date"
+            },
+            "last_checked": {
+              "type": "date"
+            },
+            "timestamp": {
+              "type": "date"
+            }
+          }
+        },
+        "infra": {
+          "properties": {
+            "attack_scenario": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "log": {
+              "properties": {
+                "type": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "managed_by": "redelk",
+    "description": "RedELK's own routing and alarm bookkeeping. infra.log.type is what filebeat sets and what the logstash outputs route on. alarm.last_checked and alarm.last_alarmed must be dates: the alarm modules run range queries such as {alarm.last_checked: {gte: now-300s}} to avoid re-querying threat intel APIs. Per-module payloads land in alarm.alarm_<module> and are mapped flattened, because each module invents its own sub-fields.",
+    "authors": [
+      "Outflank B.V. / Marc Smeets",
+      "Lorenzo Bernardi (@fastlorenzo)"
+    ]
+  }
+}

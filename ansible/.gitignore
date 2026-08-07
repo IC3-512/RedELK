@@ -1,0 +1,6 @@
+# Collections installed with:
+#   ansible-galaxy collection install -r collections.yml -p .ansible/collections
+.ansible/
+
+# A real inventory names real hosts.
+inventory-live.yml

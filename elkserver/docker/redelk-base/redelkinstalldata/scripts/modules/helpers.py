@@ -1,24 +1,56 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 """
 Part of RedELK
+
+Shared helpers for the alarm, enrichment and C2 connector modules.
+
+Rewritten for the Elasticsearch 9 client. Besides the API changes (no more `body=`, no more
+`doc_type`), this fixes several defects that silently corrupted data or stopped alarming:
+
+  * set_tags() erased every existing tag whenever the tag it was asked to add was already
+    present, and it wrote back a whole stale _source, undoing concurrent enrichment.
+  * raw_search()'s size argument overrode the size inside the query, turning "fetch one
+    document" into "fetch ten thousand".
+  * get_value() dropped the caller's default on any nested path, so callers doing arithmetic on
+    the result crashed with a TypeError.
+  * Nothing paginated: every query was capped at 5,000 or 10,000 hits with no indication that
+    results had been truncated.
+  * No request ever had a timeout, and the cron guard means one hung socket stops all alarming
+    forever.
 
 Authors:
 - Outflank B.V. / Mark Bergman (@xychix)
 - Lorenzo Bernardi (@fastlorenzo)
+- RedELK contributors
 """
+
+from __future__ import annotations
+
+import base64
 import copy
 import datetime
 import json
 import logging
-import os
 import re
+from collections.abc import Mapping
+from typing import Any, Iterator
+from urllib.parse import urlsplit, urlunsplit
 
 import config
-import urllib3
 from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
 
-# Domain name regex pattern
+logger = logging.getLogger("helpers")
+
+# Every outbound call gets a deadline. run_daemon.sh refuses to start a second daemon while one
+# is running, so a single hung request used to stop RedELK's alarming indefinitely.
+ES_TIMEOUT = 30
+HTTP_TIMEOUT = 30
+
+# Page size used when walking a result set. Elasticsearch's default max_result_window is 10,000,
+# which is why everything is paginated with search_after rather than from/size.
+PAGE_SIZE = 1000
+
 domain_pattern = re.compile(
     r"^((?:[a-zA-Z0-9]"  # First character of the domain
     r"(?:[a-zA-Z0-9-_]{0,61}[A-Za-z0-9])?\.)"  # Sub domain + hostname
@@ -27,22 +59,74 @@ domain_pattern = re.compile(
     r"(?:\s*#\s*(.*))?$"  # Optional comment
 )
 
-urllib3.disable_warnings()
-es = Elasticsearch(config.es_connection, verify_certs=False)
 
-logger = logging.getLogger("helpers")
+def _build_client() -> Elasticsearch:
+    """Build the Elasticsearch client from config.es_connection.
+
+    The connection string in config.json carries the credentials inline
+    (https://elastic:password@redelk-elasticsearch:9200) because that is how RedELK has always
+    configured it. The 8.x+ client wants them passed separately, so they are split out here
+    instead of forcing everyone to rewrite their config.
+    """
+    hosts: list[str] = []
+    basic_auth: tuple[str, str] | None = None
+
+    for entry in config.es_connection:
+        parts = urlsplit(entry)
+        if parts.username:
+            basic_auth = (parts.username, parts.password or "")
+            netloc = parts.hostname or ""
+            if parts.port:
+                netloc = f"{netloc}:{parts.port}"
+            entry = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+        hosts.append(entry)
+
+    kwargs: dict[str, Any] = {
+        "request_timeout": ES_TIMEOUT,
+        "retry_on_timeout": True,
+        "max_retries": 3,
+    }
+    if basic_auth:
+        kwargs["basic_auth"] = basic_auth
+    if config.es_ca_certs:
+        kwargs["ca_certs"] = config.es_ca_certs
+    else:
+        # The cluster uses the private RedELK CA. Without the CA file we cannot verify it; say so
+        # once rather than disabling warnings globally the way the old code did.
+        kwargs["verify_certs"] = False
+        logger.warning(
+            "no CA certificate configured (es_ca_certs); TLS verification to Elasticsearch is "
+            "disabled"
+        )
+
+    return Elasticsearch(hosts, **kwargs)
 
 
-def pprint(to_print):
-    """Returns a visual representation of an object"""
-    if isinstance(to_print, type(str)):
+es = _build_client()
+
+
+def now() -> datetime.datetime:
+    """Timezone-aware UTC now. datetime.utcnow() is deprecated and produced naive timestamps."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def now_iso() -> str:
+    """UTC timestamp in the format Elasticsearch's default date parser accepts."""
+    return now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def pprint(to_print: Any) -> str:
+    """Return a readable representation of an object."""
+    if isinstance(to_print, str):
         return to_print
-    out_string = json.dumps(to_print, indent=2, sort_keys=True)
-    return out_string
+    try:
+        return json.dumps(to_print, indent=2, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return str(to_print)
 
 
-def to_unicode(obj, charset="utf-8", errors="strict"):
-    """Converts obj to unicode"""
+def to_unicode(obj: Any, charset: str = "utf-8", errors: str = "strict") -> str | None:
+    """Convert obj to a string."""
     if obj is None:
         return None
     if not isinstance(obj, bytes):
@@ -50,293 +134,422 @@ def to_unicode(obj, charset="utf-8", errors="strict"):
     return obj.decode(charset, errors)
 
 
-def is_json(myjson):
-    """Returns true if the string is a valid json"""
+def is_json(value: Any) -> bool:
+    """True when `value` is a string containing valid JSON."""
+    if not isinstance(value, (str, bytes, bytearray)):
+        return False
     try:
-        json.loads(myjson)
-    except ValueError:
+        json.loads(value)
+    except (ValueError, TypeError):
         return False
     return True
 
 
-def match_domain_name(domain):
-    """Returns the match if the domain is valid"""
+def match_domain_name(domain: str) -> re.Match | None:
+    """Return the match when the domain is valid."""
     try:
-        return domain_pattern.match(to_unicode(domain).encode("idna").decode("ascii"))
+        text = to_unicode(domain)
+        if text is None:
+            return None
+        return domain_pattern.match(text.encode("idna").decode("ascii"))
     except (UnicodeError, UnicodeEncodeError, AttributeError):
         return None
 
 
-def get_value(path, source, default_value=None):
-    """Gets the value in source based on the provided path, or 'default_value' if not exists (default: None)"""
-    split_path = path.split(".")
-    if split_path[0] in source:
-        if len(split_path) > 1:
-            return get_value(".".join(split_path[1:]), source[split_path[0]])
-        if split_path[0] == "ip":
-            if isinstance(source[split_path[0]], type([])):
-                return source[split_path[0]][0]
-        return source[split_path[0]]
-    return default_value
+def xforce_authorization_header(credential: str) -> str:
+    """Build the IBM X-Force Authorization header from what redelk.yml carries.
+
+    api_keys.ibm_xforce is documented as either a ready-made "Basic <base64>" value or the raw
+    "<key>:<password>" pair, so both are accepted rather than one of them being sent as-is.
+
+    Shared, because it used to live only in the domain categorizer while alarm_filehash sent the
+    configured value straight through: the raw pair - one of the two documented forms - then 401'd
+    on every request, and which of your two X-Force integrations worked depended on which file you
+    happened to be looking at.
+    """
+    credential = (credential or "").strip()
+    if not credential:
+        return ""
+    if credential.lower().startswith("basic "):
+        return credential
+    encoded = base64.b64encode(credential.encode("utf-8")).decode("ascii")
+    return f"Basic {encoded}"
 
 
-def get_query(query, size=5000, index="redirtraffic-*"):
-    """Get results via ES query. Returns [] if nothing found"""
-    es_query = {"query": {"query_string": {"query": query}}}
-    # pylint: disable=unexpected-keyword-arg
-    es_result = es.search(index=index, body=es_query, size=size)
-    if es_result["hits"]["total"]["value"] == 0:
-        return []
-    return es_result["hits"]["hits"]
+def get_value(path: str, source: Any, default_value: Any = None) -> Any:
+    """Read a dotted path out of a nested mapping, returning default_value when it is absent.
+
+    The previous implementation forgot to pass default_value down the recursion, so any missing
+    nested key returned None regardless of what the caller asked for.
+
+    elasticsearch-py 9 hands back an ObjectApiResponse, which is neither a dict nor even a
+    Mapping - it wraps the payload in `.body`. Testing for dict made every read taken straight
+    off an Elasticsearch response return the default, so get_last_run() fell back to the epoch on
+    every call. That silently turned enrich_greynoise and enrich_tor into permanent no-ops: both
+    filter on `@timestamp <= last_run`, and no document is older than 1970.
+    """
+    body = getattr(source, "body", None)
+    if isinstance(body, Mapping):
+        source = body
+    if not isinstance(source, Mapping):
+        return default_value
+
+    head, _, tail = path.partition(".")
+    if head not in source:
+        return default_value
+    value = source[head]
+    if tail:
+        return get_value(tail, value, default_value)
+    # host.ip and friends are arrays in ECS; callers of this helper want a single value.
+    if head == "ip" and isinstance(value, list):
+        return value[0] if value else default_value
+    return value
 
 
-def get_hits_count(query, index="redirtraffic-*"):
-    """Returns the total number of hits for a given query"""
-    es_query = {"query": {"query_string": {"query": query}}}
-    # pylint: disable=unexpected-keyword-arg
-    es_result = es.search(index=index, body=es_query, size=0)
-    return es_result["hits"]["total"]["value"]
+# --------------------------------------------------------------------------------------------
+# Searching
+# --------------------------------------------------------------------------------------------
 
 
-def raw_search(query, size=10000, index="redirtraffic-*"):
-    """Execute a raw ES query. Returns the hits or None if no results"""
-    # pylint: disable=unexpected-keyword-arg
-    es_result = es.search(index=index, body=query, size=size)
-    if es_result["hits"]["total"]["value"] == 0:
-        return None
-    return es_result
+def get_query(query: str, size: int = 5000, index: str = "redirtraffic-*") -> list[dict]:
+    """Run a Lucene query string and return the hits (paginated). Returns [] if nothing found."""
+    return list(scan({"query_string": {"query": query}}, index=index, limit=size))
 
 
-def set_tags(tag, lst):
-    """Sets tag to all objects in lst"""
-    for doc in lst:
-        if "tags" in doc["_source"] and tag not in doc["_source"]["tags"]:
-            doc["_source"]["tags"].append(tag)
-        else:
-            doc["_source"]["tags"] = [tag]
-        es.update(index=doc["_index"], id=doc["_id"], body={"doc": doc["_source"]})
+def get_hits_count(query: str, index: str = "redirtraffic-*") -> int:
+    """Total number of documents matching a Lucene query string."""
+    result = es.search(
+        index=index,
+        query={"query_string": {"query": query}},
+        size=0,
+        track_total_hits=True,
+        ignore_unavailable=True,
+    )
+    return result["hits"]["total"]["value"]
 
 
-def add_tags_by_query(tags, query, index="redirtraffic-*"):
-    """Add tags by DSL query in batch"""
-    tags_string = ",".join(map(repr, tags))
+def raw_search(query: dict, size: int | None = None, index: str = "redirtraffic-*") -> dict | None:
+    """Run a raw query dict. Returns the raw response, or None when there are no hits.
 
-    update_q = {
-        "script": {
-            "source": f"ctx._source.tags.add([{tags_string}])",
-            "lang": "painless",
-        },
-        "query": query,
-    }
-    return es.update_by_query(index=index, body=update_q)
+    `query` may be either a bare query clause or a full search body. A `size` inside the body
+    wins over the `size` argument - the old behaviour of silently overriding it turned
+    "get_initial_beacon_doc(size=1)" into a 10,000 document fetch.
+    """
+    body = dict(query)
+    search_kwargs: dict[str, Any] = {"index": index, "ignore_unavailable": True}
 
-
-def add_alarm_data(doc, data, alarm_name, alarmed=True):
-    """Adds alarm extra data to the source doc in ES"""
-    now_str = datetime.datetime.utcnow().isoformat()
-    # Create the alarm field if it doesn't exist yet
-    if "alarm" not in doc["_source"]:
-        doc["_source"]["alarm"] = {}
-
-    # Set the last checked date
-    data["last_checked"] = now_str
-    doc["_source"]["alarm"]["last_checked"] = now_str
-
-    # set the last alarmed date (if alarmed)
-    if alarmed:
-        doc["_source"]["alarm"]["last_alarmed"] = now_str
-        data["last_alarmed"] = now_str
-
-    # Add the extra data
-    doc["_source"]["alarm"][alarm_name] = data
-
-    es.update(index=doc["_index"], id=doc["_id"], body={"doc": doc["_source"]})
-    return doc
-
-
-def set_checked_date(doc):
-    """Sets the alarm.last_checked date to an ES doc"""
-    if "alarm" in doc["_source"]:
-        doc["_source"]["alarm"]["last_checked"] = datetime.datetime.utcnow().isoformat()
+    if "query" in body or "aggs" in body or "aggregations" in body:
+        for key, value in body.items():
+            search_kwargs[key] = value
     else:
-        doc["_source"]["alarm"] = {
-            "last_checked": datetime.datetime.utcnow().isoformat()
+        search_kwargs["query"] = body
+
+    search_kwargs.setdefault("size", size if size is not None else 10000)
+    search_kwargs.setdefault("track_total_hits", True)
+
+    result = es.search(**search_kwargs)
+    if result["hits"]["total"]["value"] == 0:
+        return None
+    return result
+
+
+def scan(
+    query: dict,
+    index: str = "redirtraffic-*",
+    limit: int | None = None,
+    sort_field: str = "_doc",
+) -> Iterator[dict]:
+    """Iterate over every hit for a query, paginating with search_after.
+
+    Nothing in RedELK used to paginate, so any alarm or enrichment with more than 10,000
+    candidate documents silently processed a subset and reported a wrong total.
+    """
+    search_after: list | None = None
+    yielded = 0
+    sort = [{sort_field: "asc"}] if sort_field != "_doc" else [{"_doc": "asc"}]
+
+    while True:
+        page_size = PAGE_SIZE if limit is None else min(PAGE_SIZE, limit - yielded)
+        if page_size <= 0:
+            return
+
+        kwargs: dict[str, Any] = {
+            "index": index,
+            "query": query,
+            "size": page_size,
+            "sort": sort,
+            "track_total_hits": False,
+            "ignore_unavailable": True,
         }
-    es.update(index=doc["_index"], id=doc["_id"], body={"doc": doc["_source"]})
+        if search_after:
+            kwargs["search_after"] = search_after
+
+        result = es.search(**kwargs)
+        hits = result["hits"]["hits"]
+        if not hits:
+            return
+
+        for hit in hits:
+            yield hit
+            yielded += 1
+            if limit is not None and yielded >= limit:
+                return
+
+        search_after = hits[-1].get("sort")
+        if not search_after:
+            return
+
+
+# --------------------------------------------------------------------------------------------
+# Writing
+# --------------------------------------------------------------------------------------------
+
+
+def update_document(index: str, doc_id: str, partial: dict) -> bool:
+    """Apply a partial update to one document. Returns True on success."""
+    try:
+        es.update(index=index, id=doc_id, doc=partial, refresh=False)
+        return True
+    except Exception as error:  # pylint: disable=broad-except
+        logger.error("could not update %s/%s: %s", index, doc_id, error)
+        return False
+
+
+def bulk_update(operations: list[dict]) -> tuple[int, int]:
+    """Apply many updates in one request. Returns (succeeded, failed)."""
+    if not operations:
+        return 0, 0
+    try:
+        succeeded, errors = bulk(es, operations, raise_on_error=False, stats_only=False)
+        failed = len(errors) if isinstance(errors, list) else int(errors or 0)
+        if failed:
+            sample = json.dumps(errors[0])[:400] if isinstance(errors, list) and errors else ""
+            logger.error("%d bulk operation(s) failed, first error: %s", failed, sample)
+        return succeeded, failed
+    except Exception as error:  # pylint: disable=broad-except
+        logger.error("bulk request failed: %s", error)
+        return 0, len(operations)
+
+
+def set_tags(tag: str, lst: list[dict]) -> None:
+    """Add `tag` to every document in `lst`, in Elasticsearch and in the in-memory copy.
+
+    Two bugs lived in the old three-line version: when the tag was already present it replaced
+    the entire tag array with a single-element list, and it wrote back the whole cached _source,
+    silently reverting anything another module had written in the meantime. This one sends a
+    partial update containing only the tags field.
+    """
+    operations = []
+    for doc in lst:
+        source = doc.setdefault("_source", {})
+        tags = source.get("tags")
+        if not isinstance(tags, list):
+            tags = [tags] if isinstance(tags, str) else []
+        if tag in tags:
+            continue
+        tags.append(tag)
+        source["tags"] = tags
+        operations.append(
+            {
+                "_op_type": "update",
+                "_index": doc["_index"],
+                "_id": doc["_id"],
+                "doc": {"tags": tags},
+            }
+        )
+    if operations:
+        bulk_update(operations)
+
+
+def add_tags_by_query(tags: list[str], query: dict, index: str = "redirtraffic-*") -> Any:
+    """Add tags to every document matching a query.
+
+    The previous painless script did ctx._source.tags.add([...]) - appending the list itself as
+    a single nested element - and threw a NullPointerException on any document without a tags
+    field.
+    """
+    script = {
+        "source": (
+            "if (ctx._source.tags == null) { ctx._source.tags = []; } "
+            "for (t in params.tags) { if (!ctx._source.tags.contains(t)) { "
+            "ctx._source.tags.add(t); } }"
+        ),
+        "lang": "painless",
+        "params": {"tags": list(tags)},
+    }
+    return es.update_by_query(
+        index=index, script=script, query=query, conflicts="proceed", refresh=True
+    )
+
+
+def add_alarm_data(doc: dict, data: dict, alarm_name: str, alarmed: bool = True) -> dict:
+    """Record alarm metadata on a document."""
+    timestamp = now_iso()
+    source = doc.setdefault("_source", {})
+    alarm = source.setdefault("alarm", {})
+
+    data = dict(data)
+    data["last_checked"] = timestamp
+    alarm["last_checked"] = timestamp
+    if alarmed:
+        alarm["last_alarmed"] = timestamp
+        data["last_alarmed"] = timestamp
+    alarm[alarm_name] = data
+
+    update_document(doc["_index"], doc["_id"], {"alarm": alarm})
     return doc
 
 
-def group_hits(hits, groupby, res=None):
-    """Takes a list of hits and a list of field names (dot notation) and returns a grouped list"""
-    if len(groupby) > 0:
-        hits_list = {}
-        # First time in the loop
-        if res is None:
-            for hit in hits:
-                value = get_value(f"_source.{groupby[0]}", hit)
-                if value in hits_list:
-                    hits_list[value].append(hit)
-                else:
-                    hits_list[value] = [hit]
-        else:
-            for key, val in res.items():
-                for hit in val:
-                    value = get_value(f"_source.{groupby[0]}", hit)
-                    tmp_key = f"{key} / {value}"
-                    if tmp_key in hits_list:
-                        hits_list[tmp_key].append(hit)
-                    else:
-                        hits_list[tmp_key] = [hit]
-        groupby.pop(0)
-        return group_hits(hits, groupby, hits_list)
+def set_checked_date(doc: dict) -> dict:
+    """Record that an alarm looked at this document without alarming on it."""
+    source = doc.setdefault("_source", {})
+    alarm = source.setdefault("alarm", {})
+    alarm["last_checked"] = now_iso()
+    update_document(doc["_index"], doc["_id"], {"alarm": {"last_checked": alarm["last_checked"]}})
+    return doc
 
-    if res is None:
+
+# --------------------------------------------------------------------------------------------
+# Grouping and module bookkeeping
+# --------------------------------------------------------------------------------------------
+
+
+def group_hits(hits: list[dict], groupby: list[str], res: dict | None = None) -> list[dict]:
+    """Group hits by a list of field names, returning one representative hit per group.
+
+    Each returned hit carries `_redelk_group_count` so a connector can say "and 41 more" instead
+    of silently dropping the rest, which is what the old implementation did.
+    """
+    if not groupby:
         return hits
 
-    tmp_hits = []
-    for key, value in res.items():
-        tmp_hits.append(value[0])
+    groups: dict[str, list[dict]] = {}
+    for hit in hits:
+        key = " / ".join(str(get_value(f"_source.{field}", hit, "unknown")) for field in groupby)
+        groups.setdefault(key, []).append(hit)
 
-    return tmp_hits
+    representatives = []
+    for key, group in groups.items():
+        representative = group[0]
+        representative["_redelk_group_key"] = key
+        representative["_redelk_group_count"] = len(group)
+        representatives.append(representative)
+    return representatives
 
 
-def get_last_run(module_name):
-    """Returns the last time the module did run"""
+def get_last_run(module_name: str) -> datetime.datetime:
+    """When did this module last run? Returns the epoch when it never did."""
+    epoch = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
     try:
-        query = {"query": {"term": {"module.name": module_name}}}
-        es_result = raw_search(query, index="redelk-modules")
-        if len(es_result["hits"]["hits"]) > 0:
-            es_timestamp = get_value(
-                "_source.module.last_run.timestamp", es_result["hits"]["hits"][0]
-            )
-            es_date = datetime.datetime.strptime(es_timestamp, "%Y-%m-%dT%H:%M:%S.%f")
-            return es_date
-        return datetime.datetime.fromtimestamp(0)
-    # pylint: disable=broad-except
-    except Exception as error:
-        logger.debug("Error parsing last run time: %s", error)
-        return datetime.datetime.fromtimestamp(0)
+        result = es.get(index="redelk-modules", id=module_name, ignore=[404])
+    except Exception as error:  # pylint: disable=broad-except
+        logger.warning("could not read the last run time of %s: %s", module_name, error)
+        return epoch
+
+    if not result.get("found"):
+        return epoch
+
+    timestamp = get_value("_source.module.last_run.timestamp", result)
+    if not timestamp:
+        return epoch
+    return parse_timestamp(timestamp, default=epoch)
+
+
+def parse_timestamp(value: str, default: datetime.datetime | None = None) -> datetime.datetime:
+    """Parse an Elasticsearch timestamp, tolerating a missing fractional part and a Z suffix."""
+    text = str(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                parsed = datetime.datetime.strptime(str(value).rstrip("Z"), fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            if default is not None:
+                return default
+            raise
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
 
 
 def module_did_run(
-    module_name, module_type="unknown", status="unknown", message=None, count=0
-):
-    """Returns true if the module already ran, false otherwise"""
-    logger.debug(
-        "Module did run: %s:%s [%s] %s", module_type, module_name, status, message
-    )
+    module_name: str,
+    module_type: str = "unknown",
+    status: str = "unknown",
+    message: str | None = None,
+    count: int = 0,
+) -> bool:
+    """Record that a module ran, so the interval scheduler and the health dashboard can see it."""
+    logger.debug("module did run: %s:%s [%s] %s", module_type, module_name, status, message)
     try:
-        now_ts = datetime.datetime.utcnow().isoformat()
-        doc = {
+        document = {
+            "@timestamp": now_iso(),
             "module": {
                 "name": module_name,
                 "type": module_type,
-                "last_run": {"timestamp": now_ts, "status": status, "count": count},
-            }
+                "last_run": {"timestamp": now_iso(), "status": status, "count": count},
+            },
         }
         if message:
-            doc["module"]["last_run"]["message"] = message
-        es.index(index="redelk-modules", id=module_name, body=doc)
+            document["module"]["last_run"]["message"] = message[:2000]
+        es.index(index="redelk-modules", id=module_name, document=document)
         return True
-    # pylint: disable=broad-except
-    except Exception as error:
-        logger.error(
-            "Error writting last run time for module %s: %s",
-            module_name,
-            os.path.join(config.TEMP_DIR, module_name),
-        )
-        logger.exception(error)
+    except Exception as error:  # pylint: disable=broad-except
+        logger.error("could not record the run of module %s: %s", module_name, error)
         return False
 
 
-def module_should_run(module_name, module_type):  # pylint: disable=too-many-branches
-    """Check if the module is enabled and when is the last time the module ran.
-    If the last time is before now - interval, the module will be allowed to run"""
+def module_should_run(module_name: str, module_type: str) -> bool:
+    """Is the module enabled, and has its interval elapsed?"""
     if module_type == "redelk_alarm":
-        if module_name not in config.alarms:
-            logger.warning(
-                "Missing configuration for alarm [%s]. Will not run!", module_name
-            )
-            return False
-
-        if (
-            "enabled" in config.alarms[module_name]
-            and not config.alarms[module_name]["enabled"]
-        ):
-            logger.warning(
-                "Alarm module [%s] disabled in configuration file. Will not run!",
-                module_name,
-            )
-            return False
-
-        if "interval" in config.alarms[module_name]:
-            interval = config.alarms[module_name]["interval"]
-        else:
-            interval = 360
-
+        settings = config.alarms.get(module_name)
+        kind = "alarm"
     elif module_type == "redelk_enrich":
-        if module_name not in config.enrich:
-            logger.warning(
-                "Missing configuration for enrichment module [%s]. Will not run!",
-                module_name,
-            )
-            return False
-
-        if (
-            "enabled" in config.enrich[module_name]
-            and not config.enrich[module_name]["enabled"]
-        ):
-            logger.warning(
-                "Enrichment module [%s] disabled in configuration file. Will not run!",
-                module_name,
-            )
-            return False
-
-        if "interval" in config.enrich[module_name]:
-            interval = config.enrich[module_name]["interval"]
-        else:
-            interval = 360
-
+        settings = config.enrich.get(module_name)
+        kind = "enrichment"
     else:
-        logger.warning(
-            "Invalid module type for shouldModuleRun(%s, %s)", module_name, module_type
-        )
+        logger.warning("unknown module type %s for %s", module_type, module_name)
         return False
 
-    now = datetime.datetime.utcnow()
-    last_run = get_last_run(module_name)
-    interval = datetime.timedelta(seconds=interval)
-    last_run_max = now - interval
+    if settings is None:
+        logger.warning("no configuration for %s module [%s]; not running it", kind, module_name)
+        return False
+    if not settings.get("enabled", False):
+        logger.debug("%s module [%s] is disabled", kind, module_name)
+        return False
 
-    should_run = last_run < last_run_max
+    interval = settings.get("interval", 360)
+    try:
+        interval = int(interval)
+    except (TypeError, ValueError):
+        logger.warning(
+            "invalid interval %r for %s; falling back to 360 seconds", interval, module_name
+        )
+        interval = 360
+
+    last_run = get_last_run(module_name)
+    threshold = now() - datetime.timedelta(seconds=interval)
+    should_run = last_run < threshold
 
     if not should_run:
-        logger.info(
-            "Module [%s] already ran within the interval of %s seconds (%s)",
+        logger.debug(
+            "module [%s] already ran within its %ss interval (last run %s)",
             module_name,
             interval,
             last_run.isoformat(),
         )
-    else:
-        logger.info("All checks ok for module [%s]. Module should run.", module_name)
-        logger.debug(
-            "Last run: %s | Last run max: %s",
-            last_run.isoformat(),
-            last_run_max.isoformat(),
-        )
     return should_run
 
 
-def get_initial_alarm_result():
-    """Returns the initial_alarm_result object"""
-    return copy.deepcopy(initial_alarm_result)
-
-
-initial_alarm_result = {
+initial_alarm_result: dict[str, Any] = {
     "info": {
         "version": 0.0,
         "name": "unknown",
-        "alarmmsg": "unkown",
+        "alarmmsg": "unknown",
         "description": "unknown",
         "type": "redelk_alarm",
         "submodule": "unknown",
@@ -347,3 +560,8 @@ initial_alarm_result = {
     "groupby": [],
     "status": "unknown",
 }
+
+
+def get_initial_alarm_result() -> dict:
+    """A fresh result skeleton for a module to fill in."""
+    return copy.deepcopy(initial_alarm_result)

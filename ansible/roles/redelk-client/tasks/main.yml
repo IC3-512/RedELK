@@ -1,0 +1,63 @@
+---
+# Copy this host's installation package and run the installer that redelkctl put inside it. The
+# package is self contained - filebeat config, inputs, certificates, cron, helper scripts and a
+# manifest - so there is nothing here to keep in step with redelk.yml.
+
+- name: Look for this host's package on the control node
+  delegate_to: localhost
+  become: false
+  ansible.builtin.stat:
+    path: "{{ redelk_packages_path }}/{{ redelk_package_name }}/manifest.json"
+  register: redelk_client_package
+
+- name: Fail when this host has no package
+  ansible.builtin.assert:
+    that:
+      - redelk_client_package.stat.exists
+    fail_msg: >-
+      {{ redelk_packages_path }}/{{ redelk_package_name }}/ does not exist. Add an entry named
+      '{{ redelk_package_name }}' to redelk.yml (or set redelk_package_name on this host), then run
+      './redelkctl generate'.
+    quiet: true
+
+- name: Create the RedELK directory
+  ansible.builtin.file:
+    path: "{{ redelk_client_package_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# mode: preserve keeps what redelkctl decided: 0600 on the client key, 0755 on install.py.
+- name: Copy the installation package to the host
+  ansible.builtin.copy:
+    src: "{{ redelk_packages_path }}/{{ redelk_package_name }}/"
+    dest: "{{ redelk_client_package_path }}/"
+    owner: root
+    group: root
+    mode: preserve
+    directory_mode: "0700"
+  register: redelk_client_copy
+
+- name: Check whether this host already ships to RedELK
+  ansible.builtin.stat:
+    path: "{{ redelk_client_filebeat_config }}"
+  register: redelk_client_installed
+
+# The installer is idempotent, but it cannot report that to Ansible, so it is only run when there
+# is a reason to: the package changed, filebeat was never installed, or the operator asks for it.
+- name: Install the RedELK shipper
+  ansible.builtin.command:
+    argv: "{{ ['./install.py'] + redelk_client_install_args }}"
+    chdir: "{{ redelk_client_package_path }}"
+  register: redelk_client_install
+  changed_when: true
+  when: >-
+    redelk_client_copy is changed
+    or not redelk_client_installed.stat.exists
+    or redelk_client_force_install | bool
+
+- name: Show what the installer did
+  ansible.builtin.debug:
+    var: redelk_client_install.stdout_lines
+  when: redelk_client_install.stdout_lines is defined

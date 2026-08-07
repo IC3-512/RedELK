@@ -6,14 +6,23 @@
 # Author: Outflank B.V. / Marc Smeets
 #
 
+# Before 4.2 the harvested file is named after the beacon id rather than after the log file we
+# are reading, so rebuild the file name from implant.id. The directory part is anchored on
+# '/cobaltstrike' exactly like the 4.2+ variant.
 def filter(event)
 	host = event.get("[agent][name]")
 	logpath = event.get("[log][file][path]")
 	implant_id = event.get("[implant][id]")
-	temppath = logpath.split('/cobaltstrike')
-	temppath2 = temppath[1].split(/\/([^\/]*)$/)
-	keystrokespath = "/c2logs/" + "#{host}" + "/cobaltstrike" + "#{temppath2[0]}" + "/keystrokes_" + "#{implant_id}" + ".txt"
+	index = logpath.nil? ? nil : logpath.rindex("/cobaltstrike")
+
+	if host.nil? || implant_id.nil? || index.nil?
+		event.tag("_rubyparsefailure")
+		return [event]
+	end
+
+	logdir = File.dirname(logpath[index..-1])
+	keystrokespath = "/c2logs/" + "#{host}" + "#{logdir}" + "/keystrokes_" + "#{implant_id}" + ".txt"
 	event.tag("_rubyparseok")
-  	event.set("[keystrokes][url]", keystrokespath)
+	event.set("[keystrokes][url]", keystrokespath)
 	return [event]
 end

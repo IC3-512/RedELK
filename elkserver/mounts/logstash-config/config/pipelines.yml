@@ -4,4 +4,8 @@
 
 - pipeline.id: redelk-pipeline
   path.config: "/usr/share/logstash/redelk-main/conf.d"
+  # Pinned to v1 on purpose. Logstash 9.x defaults to v8, which changes what the beats input,
+  # the geoip/useragent/dns filters and the clone filter write into an event. Every RedELK
+  # filter, every Elasticsearch index template and every Kibana saved object is built against
+  # the v1 layout, so moving to v8 silently empties large parts of the dashboards.
   pipeline.ecs_compatibility: v1

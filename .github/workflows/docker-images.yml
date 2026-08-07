@@ -1,0 +1,118 @@
+name: Docker images
+
+# RedELK v3 builds only two images of its own; Elasticsearch, Kibana and Logstash run the stock
+# docker.elastic.co images. The former dev/prd split was two triggers over the same build, so the
+# tag strategy is left to docker/metadata-action and everything else lives here once.
+on:
+  push:
+    branches:
+      - master
+      - develop
+      - "feat/**"
+      - "fix/**"
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "elkserver/docker/redelk-base/**"
+      - "elkserver/docker/redelk-jupyter/**"
+      - ".github/workflows/docker-images.yml"
+  workflow_dispatch:
+
+# Tag builds publish releases and must never be cancelled halfway through.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write # without this the GITHUB_TOKEN is read-only and GHCR pushes 403
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: redelk-base
+            context: elkserver/docker/redelk-base
+          - image: redelk-jupyter
+            context: elkserver/docker/redelk-jupyter
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Forks and clones have no Docker Hub credentials and must still be able to build and push
+      # to their own GHCR. The secrets context cannot be read from a step condition, so it is
+      # turned into an output here.
+      - name: Detect available registries
+        id: registries
+        env:
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          if [ -n "${DOCKER_PASSWORD}" ]; then
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Docker Hub::DOCKER_PASSWORD is not set, pushing to GHCR only"
+          fi
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+            name=${{ vars.DOCKER_REPO || 'outflanknl' }}/${{ matrix.image }},enable=${{ steps.registries.outputs.dockerhub }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.description=RedELK ${{ matrix.image }}
+
+      - name: Set up QEMU
+        if: github.event_name != 'pull_request'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request' && steps.registries.outputs.dockerhub == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          # arm64 is emulated through QEMU and roughly triples the build time, which is worth it
+          # for a published image but not for validating a pull request.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          # Both matrix legs share one GHA cache namespace unless the scope is set per image.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

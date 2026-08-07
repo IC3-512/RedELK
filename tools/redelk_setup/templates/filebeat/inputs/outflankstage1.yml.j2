@@ -1,0 +1,32 @@
+{{ header }}
+# Outflank Stage1 C2 implant logs.
+#
+# Stage1 v2 no longer writes the server-level main.log; implant activity is rendered into
+# shared/logs/api/implant_logs/legacy_text/. If your deployment uses a different layout, set
+# `paths.base` for this C2 server in redelk.yml.
+
+{% set base = base_path or '/root/stage1c2server' %}
+
+- type: filestream
+  id: outflankstage1-implant
+  enabled: true
+  paths:
+    - {{ base }}/shared/logs/api/implant_logs/legacy_text/*.log
+  prospector.scanner.check_interval: 5s
+  parsers:
+    - multiline:
+        type: pattern
+        # match "2020-04-26 19:49:03 UTC "
+        pattern: '^\d\d\d\d\-\d\d\-\d\d\s\d\d:\d\d:\d\d\sUTC\s'
+        negate: true
+        match: after
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: stage1
+      log:
+        type: implant

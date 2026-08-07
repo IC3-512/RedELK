@@ -1,0 +1,22 @@
+{{ header }}
+# Synchronise {{ host.type }} data into the scponly user's home directory, from where the RedELK
+# server pulls it over ssh. Installed as /etc/cron.d/redelk_{{ host.type }}.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+{% if host.type == 'cobaltstrike' %}
+* * * * * root /usr/bin/rsync -rx --append-verify --delete {{ base_path }}/logs /home/scponly/cobaltstrike/ && /bin/chown -R scponly:scponly /home/scponly/cobaltstrike
+* * * * * root /usr/bin/rsync -rx --append-verify --delete {{ base_path }}/../profiles /home/scponly/cobaltstrike/ && /bin/chown -R scponly:scponly /home/scponly/cobaltstrike
+* * * * * root /usr/bin/rsync -rx --append-verify --delete {{ base_path }}/data /home/scponly/cobaltstrike/ && /bin/chown -R scponly:scponly /home/scponly/cobaltstrike
+* * * * * root /usr/share/redelk/bin/export_cobaltstrikedata.sh
+* * * * * root /usr/share/redelk/bin/copydownloads_cobaltstrike.sh
+{% elif host.type == 'sliver' %}
+* * * * * root /usr/bin/rsync -rx --append-verify --delete {{ base_path }}/logs/audit.json /home/scponly/sliver/ && /bin/chown -R scponly:scponly /home/scponly/sliver
+{% elif host.type == 'outflankstage1' %}
+* * * * * root /usr/bin/rsync -rx --append-verify --delete {{ base_path }}/shared/logs /home/scponly/stage1/ && /bin/chown -R scponly:scponly /home/scponly/stage1
+* * * * * root /usr/share/redelk/bin/copydownloads_outflankstage1.sh
+{% elif host.type == 'poshc2' %}
+* * * * * root /usr/bin/rsync -rx --append-verify --delete {{ base_path }}/downloads /home/scponly/poshc2/ && /bin/chown -R scponly:scponly /home/scponly/poshc2
+* * * * * root /usr/bin/rsync -rx --append-verify --delete {{ base_path }}/reports /home/scponly/poshc2/ && /bin/chown -R scponly:scponly /home/scponly/poshc2
+{% endif %}

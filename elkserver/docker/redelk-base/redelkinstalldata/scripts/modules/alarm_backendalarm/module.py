@@ -8,19 +8,27 @@ This check queries for calls to backends that have alarm in their name
 Authors:
 - Outflank B.V. / Mark Bergman (@xychix)
 - Lorenzo Bernardi (@fastlorenzo)
+- RedELK contributors
 """
+
 import logging
 
 from modules.helpers import get_initial_alarm_result, get_query
 
 info = {
-    "version": 0.1,
+    "version": 0.2,
     "name": "backend alarm module",
     "alarmmsg": "TRAFFIC TO ANY BACKEND WITH THE WORD ALARM IN THE NAME",
     "description": "This check queries for calls to backends that have alarm in their name",
     "type": "redelk_alarm",  # Could also contain redelk_enrich if it was an enrichment module
     "submodule": "alarm_backendalarm",
 }
+
+# Upper bound on the documents one run reports. get_query() paginates with search_after, so this
+# is not the old 10,000 document ceiling of Elasticsearch's max_result_window - it only keeps a
+# redirector under sustained scanning from turning a single notification into a million lines.
+# Everything above the cap keeps its untagged state and is picked up by the next run.
+MAX_HITS = 10000
 
 
 class Module:
@@ -37,7 +45,10 @@ class Module:
         ret["info"] = info
         ret["fields"] = [
             "@timestamp",
+            "agent.name",
             "source.ip",
+            "source.geo.country_name",
+            "source.as.organization.name",
             "http.headers.useragent",
             "source.cdn.ip",
             "redir.frontend.name",
@@ -48,15 +59,19 @@ class Module:
         report = self.alarm_check()
         ret["hits"]["hits"] = report["hits"]
         ret["hits"]["total"] = len(report["hits"])
-        self.logger.info(
-            "finished running module. result: %s hits", ret["hits"]["total"]
-        )
+        self.logger.info("finished running module. result: %s hits", ret["hits"]["total"])
         return ret
 
-    # pylint: disable=no-self-use
     def alarm_check(self):
         """This check queries for calls to backends that have *alarm* in their name"""
-        es_query = f'redir.backend.name:*alarm* AND NOT tags:{info["submodule"]}'
-        es_results = get_query(es_query, 10000)
-        report = {"hits": es_results}
-        return report
+        es_query = f"redir.backend.name:*alarm* AND NOT tags:{info['submodule']}"
+        es_results = get_query(es_query, MAX_HITS, index="redirtraffic-*")
+
+        if len(es_results) >= MAX_HITS:
+            self.logger.warning(
+                "hit the %d document cap; the remaining matches stay untagged and are reported "
+                "on the next run",
+                MAX_HITS,
+            )
+
+        return {"hits": es_results}

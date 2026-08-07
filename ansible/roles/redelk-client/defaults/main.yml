@@ -1,0 +1,25 @@
+---
+# The RedELK repository on the control node: the directory holding redelk.yml and ./redelkctl.
+redelk_repo_path: "{{ playbook_dir | dirname }}"
+
+# Where './redelkctl generate' wrote the per-host installation packages.
+redelk_packages_path: "{{ redelk_repo_path }}/build/packages"
+
+# The package this host gets: build/packages/<redelk_package_name>/. The inventory host name ties
+# an inventory entry to its redelk.yml entry; override it per host only when they cannot match.
+redelk_package_name: "{{ inventory_hostname }}"
+
+# Where the package is staged on the host. It carries this host's private key, so it is created
+# root-owned and unreadable by anyone else.
+redelk_remote_base_path: /opt/redelk
+redelk_client_package_path: "{{ redelk_remote_base_path }}/{{ redelk_package_name }}"
+
+# Extra flags for the generated installer, for example ["--dry-run"] or ["--no-filebeat"].
+redelk_client_install_args: []
+
+# The installer runs when the package changed or when this host has no filebeat configuration yet.
+# Set to true to run it on every play, for example after changing something by hand on the host.
+redelk_client_force_install: false
+
+# What the installer writes, used to tell "already installed" from "never installed".
+redelk_client_filebeat_config: /etc/filebeat/filebeat.yml

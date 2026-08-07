@@ -1,0 +1,11 @@
+---
+# ansible.posix   synchronize, used to copy the repository to the RedELK server
+# community.docker  used by the molecule scenarios to create and destroy the test containers
+#
+# Nothing else is needed: this tree renders no templates and generates no certificates - redelkctl
+# does all of that on the control node.
+collections:
+  - name: ansible.posix
+    version: "2.1.0"
+  - name: community.docker
+    version: "5.1.0"

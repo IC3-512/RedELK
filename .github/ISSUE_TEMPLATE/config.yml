@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage questions and deployment help
+    url: https://github.com/outflanknl/RedELK/discussions
+    about: Ask here before opening an issue.
+  - name: Documentation
+    url: https://github.com/outflanknl/RedELK/wiki
+    about: Installation and usage documentation.
+  - name: Security vulnerability
+    url: https://github.com/outflanknl/RedELK/security/policy
+    about: Report privately, not in a public issue.

@@ -1,0 +1,4 @@
+---
+# Run the playbook operators run, rather than a molecule-only copy of it that can drift.
+- name: Converge
+  ansible.builtin.import_playbook: ../../playbook.yml

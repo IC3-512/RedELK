@@ -1,42 +1,100 @@
-# Adds lable to PR based on file changes
+# Configuration for actions/labeler (v5+ schema).
+#
+# Two kinds of label are applied. Area labels come from the paths a pull request touches. Change
+# type labels come from the branch name, because that is the only signal available before review
+# and .github/release-drafter.yml groups the changelog by exactly those labels.
 
-# C2 server files
+# ------------------------------------------------------------------------------------------------
+# area
+# ------------------------------------------------------------------------------------------------
 c2servers:
-  - "c2servers/**/*"
+  - changed-files:
+      - any-glob-to-any-file:
+          - c2servers/**
 
-# ELK server files
-elkserver:
-  - "elkserver/**/*"
-
-# Redirector files
 redirs:
-  - "redirs/**/*"
+  - changed-files:
+      - any-glob-to-any-file:
+          - redirs/**
 
-# Helper scripts
-helpers:
-  - "helper-scripts/**/*"
+elkserver:
+  - changed-files:
+      - any-glob-to-any-file:
+          - elkserver/**
 
-# Documentation
-documentation:
-  - "README.md"
-  - "LICENSE"
-  - "VERSION"
-  - "releasenotes.txt"
-  - "images/**/*"
-  - "example-data-and-configs/**/*"
-
-# Installer files
-installer:
-  - "initial-setup.sh"
-  - "c2servers/install-c2server-*.sh"
-  - "elkserver/install-elkserver.sh"
-  - "elkserver/redelk-*.yml"
-  - "redirs/install-redir.sh"
-
-# Docker files
 docker:
-  - "elkserver/docker/**/*"
+  - changed-files:
+      - any-glob-to-any-file:
+          - elkserver/docker/**
+          - "**/Dockerfile"
+          - "**/docker-compose*.yml"
 
-# GitHub workflows and CI/CD files
-githubci:
-  - ".github/**/*"
+setup:
+  - changed-files:
+      - any-glob-to-any-file:
+          - redelkctl
+          - tools/**
+          - redelk.yml.example
+
+ansible:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ansible/**
+
+helpers:
+  - changed-files:
+      - any-glob-to-any-file:
+          - helper-scripts/**
+
+ci:
+  - any:
+      - changed-files:
+          - any-glob-to-any-file:
+              - .github/**
+              - .pre-commit-config.yaml
+      - head-branch:
+          - "^ci/"
+
+documentation:
+  - any:
+      - changed-files:
+          - any-glob-to-any-file:
+              - "**/*.md"
+              - LICENSE
+              - VERSION
+              - releasenotes.txt
+              - images/**
+              - example-data-and-configs/**
+      - head-branch:
+          - "^docs?/"
+
+dependencies:
+  - any:
+      - changed-files:
+          - any-glob-to-any-file:
+              - "**/requirements.txt"
+              - .github/dependabot.yml
+      - head-branch:
+          - "^deps/"
+          - "^dependabot/"
+
+# ------------------------------------------------------------------------------------------------
+# change type - keep in sync with the categories in .github/release-drafter.yml
+# ------------------------------------------------------------------------------------------------
+feature:
+  - head-branch:
+      - "^feat/"
+      - "^feature/"
+
+fix:
+  - head-branch:
+      - "^fix/"
+      - "^bugfix/"
+      - "^hotfix/"
+
+maintenance:
+  - head-branch:
+      - "^refactor/"
+      - "^chore/"
+      - "^style/"
+      - "^test/"

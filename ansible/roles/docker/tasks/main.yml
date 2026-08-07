@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: MIT-0
+---
+- name: Ensure the target runs a distribution Docker publishes packages for
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["os_family"] == "Debian"
+      - ansible_facts["distribution"] in docker_supported_releases
+    fail_msg: >-
+      This role installs Docker from Docker's own apt repository, which exists for
+      {{ docker_supported_releases | list | join(' and ') }} only - this host reports
+      '{{ ansible_facts["distribution"] }}'. Install Docker Engine by hand and run the playbook
+      with redelk_install_docker=false.
+
+- name: Ensure the release is supported by this role
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["distribution_release"] in docker_supported_releases[ansible_facts["distribution"]]
+    fail_msg: >-
+      Unsupported {{ ansible_facts["distribution"] }} release
+      '{{ ansible_facts["distribution_release"] }}'. Supported by this role:
+      {{ docker_supported_releases[ansible_facts["distribution"]] | join(', ') }}.
+
+- name: Warn when using Ubuntu 20.04 (EOL)
+  ansible.builtin.debug:
+    msg: >-
+      Ubuntu 20.04 (focal) is EOL. This role still installs Docker for focal,
+      but assumes the host apt repositories are already correctly configured.
+  when: ansible_facts["distribution_release"] == "focal"
+
+- name: Remove conflicting packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose
+      - docker-compose-v2
+      - docker-doc
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install Docker prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - python3-debian
+    state: present
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Docker apt signing key
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}/gpg"
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Map system architecture to Docker apt architecture
+  ansible.builtin.set_fact:
+    docker_apt_arch: >-
+      {{ docker_apt_arch_map.get(ansible_facts['architecture'], ansible_facts['architecture']) }}
+
+- name: Ensure architecture is supported by Docker apt repository
+  ansible.builtin.assert:
+    that:
+      - docker_apt_arch in ['amd64', 'arm64', 'armhf', 'ppc64el', 's390x']
+    fail_msg: >-
+      Unsupported architecture '{{ ansible_facts["architecture"] }}'
+      (mapped '{{ docker_apt_arch }}') for Docker apt repository.
+
+- name: Configure Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types:
+      - deb
+    uris:
+      - "https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}"
+    suites:
+      - "{{ ansible_facts['distribution_release'] }}"
+    components:
+      - stable
+    architectures:
+      - "{{ docker_apt_arch }}"
+    signed_by: /etc/apt/keyrings/docker.asc
+    state: present
+
+- name: Update apt cache after adding Docker repository
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install Docker packages
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+  notify: Restart docker service
+
+- name: Ensure Docker service is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started

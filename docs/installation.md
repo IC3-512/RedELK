@@ -1,0 +1,365 @@
+# Installation
+
+RedELK v3 is installed from this repository. There is one configuration file, `redelk.yml`, and one
+command, `./redelkctl`. The four shell installers of v2 (`initial-setup.sh`,
+`elkserver/install-elkserver.sh`, `c2servers/install-c2server.sh`, `redirs/install-redir.sh`) are
+gone; see [upgrading.md](upgrading.md) if you are coming from v2.
+
+Installation has three parts:
+
+1. [The RedELK server](#1-the-redelk-server) - runs the Elastic stack and the RedELK daemon.
+2. [Redirectors and file-based C2 servers](#3-redirectors-and-file-based-c2-servers) - get a
+   generated Filebeat package.
+3. [API-based C2 servers](#4-api-based-c2-servers-mythic-outflank-c2) (Mythic, Outflank C2) - get
+   nothing installed; the RedELK server polls them.
+
+---
+
+## 0. Prerequisites
+
+On the RedELK server:
+
+- Debian 11+ / Ubuntu 22.04+ (any Linux with Docker works; the client installer is Debian-only).
+- Docker Engine with the Compose **v2** plugin. `redelkctl` checks with `docker compose version`
+  and falls back to the deprecated standalone `docker-compose` binary with a warning.
+- Python 3.10 or newer. `./redelkctl` creates its own virtualenv in `.redelk-venv/` on first run
+  and installs `PyYAML`, `Jinja2` and `cryptography` into it. On a host without internet access,
+  `apt-get install -y python3-yaml python3-jinja2 python3-cryptography` and run it again - it uses
+  the system packages when they are importable.
+- 8 GB RAM for `profile: full`, 4 GB for `profile: limited`.
+- Root once, to raise `vm.max_map_count` (Elasticsearch refuses to start below 262144). Afterwards
+  a user in the `docker` group is enough.
+
+On redirectors and file-based C2 servers: Debian/Ubuntu with `apt`, root, and outbound access to
+the RedELK server's ingest port (5044 by default).
+
+---
+
+## 1. The RedELK server
+
+### 1.1 Get the code and write the configuration
+
+```sh
+git clone https://github.com/outflanknl/RedELK.git
+cd RedELK
+./redelkctl init            # copies redelk.yml.example to redelk.yml
+$EDITOR redelk.yml
+```
+
+The only key with no usable default is `server.hostnames`. Everything else has one; the file is
+heavily commented and [configuration.md](configuration.md) is the full reference.
+
+A minimal, working configuration:
+
+```yaml
+version: 3
+
+project:
+  name: acme-2026
+
+server:
+  hostnames:
+    - redelk.example.com
+  profile: limited
+
+c2_servers:
+  - name: c2server1
+    type: cobaltstrike
+    host: 198.51.100.20
+    paths:
+      base: /root/cobaltstrike/server
+
+redirectors:
+  - name: redir1
+    type: haproxy
+
+modules:
+  alarms:
+    filehash: { enabled: false }     # needs a VirusTotal / X-Force / Hybrid Analysis key
+  enrich:
+    greynoise: { enabled: false }    # needs your own GreyNoise key
+    domainscategorization: { enabled: false }
+```
+
+Validate it before doing anything else:
+
+```sh
+./redelkctl validate
+```
+
+`validate` reports **every** problem at once with the exact key path, and refuses unknown keys - a
+typo in a config key is otherwise a silent no-op. It also cross-checks configuration that would be
+a silent no-op at runtime, for example `modules.enrich.greynoise` enabled without
+`api_keys.greynoise`.
+
+Output on success is a summary of what will be deployed: hostnames, profile, Elastic version,
+ingest endpoint, TLS mode, every C2 server with its ingest style, every redirector, and which
+notification channels are on.
+
+### 1.2 Install
+
+```sh
+sudo ./redelkctl install
+```
+
+This does, in order:
+
+1. **Pre-flight checks.** Docker present and reachable; total memory against the profile minimum;
+   `vm.max_map_count` (raised and persisted to `/etc/sysctl.d/99-redelk.conf` when run as root -
+   pass `--no-sysctl` to skip); ports 80, 443, 5044 (and 8443 on the full profile) not already in
+   use. A hard failure stops the install here.
+2. **Generate configuration** - see [what gets generated](#12-what-gets-generated) below.
+3. **Generate the client packages** into `build/packages/`.
+4. **`docker compose up -d`** in `elkserver/`. Add `--build` behaviour with
+   `elastic.build_local: true` in `redelk.yml`, or `--pull` on the command line to always fetch the
+   newest images.
+5. **Wait for the stack**: Elasticsearch cluster health yellow or green, then Kibana status
+   `available`. Default timeout 600 seconds (`--timeout`).
+6. Print the URLs and where the credentials are.
+
+Useful flags:
+
+| Flag | Effect |
+|---|---|
+| `--generate-only` | Write everything, start nothing. Useful to inspect the output first. |
+| `--pull` | `docker compose up --pull=always`. |
+| `--no-sysctl` | Never touch `vm.max_map_count`; fail the check instead. |
+| `--timeout N` | Seconds to wait for Elasticsearch and Kibana. |
+| `-c PATH` | Use a different configuration file than `./redelk.yml`. |
+
+### 1.2 What gets generated
+
+`redelkctl generate` (run on its own, or as part of `install`) writes these. All of them carry a
+"generated by redelkctl - do not edit" header and are safe to delete: regenerate with
+`./redelkctl generate`.
+
+| Path | What it is |
+|---|---|
+| `redelk.secrets.yml` | Every generated password and key. Mode `0600`, git-ignored. Created once; existing values are never regenerated, because they are already baked into the running cluster. |
+| `elkserver/.env` | The docker compose environment: image versions, heap sizes, published ports, certificate paths, all `CREDS_*`. Mode `0600`. |
+| `elkserver/mounts/redelk-config/etc/redelk/config.json` | The RedELK daemon's configuration: module enable/interval, notification channels, API keys, and the API-based C2 servers. Mode `0600`. |
+| `elkserver/mounts/redelk-config/etc/cron.d/redelk` | The cron file inside `redelk-base`: the rsync jobs per file-based C2 server, the Tor and rogue-domain refreshes, thumbnailing, and `daemon.py` every minute. |
+| `elkserver/mounts/nginx-config/default.conf.template` | The nginx site: TLS, basic auth, the Kibana proxy, `/c2logs`, and (full profile) `/jupyter` and the BloodHound vhost on 8443. |
+| `elkserver/mounts/nginx-config/htpasswd.users.template` | Basic auth for nginx. Exactly one account, `redelk`, hashed with APR1. |
+| `elkserver/mounts/redelk-config/etc/redelk/*.conf` | The IP / domain / user-agent lists, seeded from `lists:` in `redelk.yml`. **Only written when absent** - RedELK keeps them in sync with Elasticsearch at runtime, so regenerating never discards entries you added in Kibana. |
+| `.../templates/redelk_elasticsearch_ilm.json` | The ILM policy, derived from `elastic.retention`. |
+| `elkserver/mounts/certs/ca/ca.{crt,key}` | The RedELK CA. |
+| `elkserver/mounts/certs/redelk-{elasticsearch,kibana,logstash}/` | Internal stack certificates. |
+| `elkserver/mounts/logstash-config/certs_inputs/` | `elkserver.crt` / `elkserver.key` (the certificate the beats input presents) and `redelkCA.crt`. |
+| `elkserver/mounts/logstash-config/certs_clients/<host>/` | One client certificate per redirector / file-based C2 server, when `server.tls.mutual_auth` is true. |
+| `elkserver/mounts/nginx-certs/self-signed/` | The certificate nginx serves when `server.tls.mode: self-signed` (leaf + CA, so the chain builds once the CA is trusted). |
+| `elkserver/mounts/redelk-ssh/id_rsa{,.pub}` | The keypair the RedELK server uses to rsync artefacts off C2 servers. |
+| `build/packages/<name>/` and `<name>.tar.gz` | One self-contained installation package per redirector and file-based C2 server. |
+
+Certificate generation is idempotent: existing material is reused unless it expires within 30 days
+or its subject alternative names no longer cover `server.hostnames` / `server.ips`.
+
+### 1.3 What happens inside the containers
+
+On first start, `redelk-base` provisions the cluster (`bootstrap.py`):
+
+- sets the `kibana_system` and `logstash_system` passwords,
+- creates the `redelk_ingest` and `redelk_operator` roles and the `redelk_ingest` and `redelk`
+  users,
+- installs the `redelk` ILM policy,
+- installs the component templates and the composable index templates,
+- imports the Kibana data views, searches, maps, visualisations and dashboards **once**, then
+  writes `/var/lib/redelk/kibana-provisioned` so your dashboard edits survive a restart. Force a
+  re-import with `REDELK_FORCE_KIBANA_IMPORT=1`.
+
+The container is healthy once `/var/lib/redelk/es-provisioned` exists; Kibana waits for that,
+because it cannot authenticate before its service account password is set.
+
+### 1.4 Verify
+
+```sh
+./redelkctl status     # docker compose ps
+./redelkctl doctor     # the real check
+```
+
+`doctor` checks containers, Elasticsearch health and disk usage, whether the index templates and
+ILM policy are installed, whether documents arrived in the last 24 hours (per `c2.program` and
+`redir.program`), certificate expiry, whether a notification channel is enabled, and whether each
+configured C2 API answers and accepts the credentials. Every failing check prints a next step.
+
+### 1.5 TLS for the web interface
+
+`server.tls.mode` picks what nginx serves on 443:
+
+- **`self-signed`** (default) - `redelkctl` issues a certificate for `server.hostnames[0]` from the
+  RedELK CA. Works everywhere; your browser will warn until you trust
+  `elkserver/mounts/certs/ca/ca.crt`.
+- **`letsencrypt`** - the `certbot` container is enabled through the `letsencrypt` compose profile
+  and renews every 12 hours through the webroot at `/.well-known/acme-challenge/`. Requires
+  `server.hostnames[0]` to be a real FQDN resolving to this host, port 80 reachable from the
+  internet, and `server.tls.letsencrypt.email` set. Use `staging: true` while you experiment - Let's
+  Encrypt rate limits are unforgiving.
+- **`custom`** - point `server.tls.custom.certificate` and `.key` at your own PEM files.
+
+This is independent of the RedELK CA, which always exists and always signs the internal stack
+certificates and the beats/client certificates.
+
+---
+
+## 2. Redirector web server configuration
+
+RedELK's Logstash filters parse a specific log format. Before installing the package, make the
+redirector produce it. Working examples are in `example-data-and-configs/`:
+
+| Type | Example config | Log file Filebeat reads |
+|---|---|---|
+| `haproxy` | `example-data-and-configs/HAProxy/haproxy.cfg` | `/var/log/haproxy.log` |
+| `apache` | `example-data-and-configs/Apache/redelk-redir-apache.conf` | `/var/log/apache2/access-redelk.log` |
+| `nginx` | `example-data-and-configs/nginx/redelk-redir-nginx.conf` | `/var/log/nginx/access-redelk.log` |
+
+Backend names matter to RedELK:
+
+- a backend whose name starts with **`c2`** marks implant traffic - `alarm_httptraffic` and
+  `alarm_useragent` query `redir.backend.name:c2*`;
+- a backend whose name contains **`alarm`** raises an alarm on every hit
+  (`alarm_backendalarm`), which is how you wire "anyone who requests this path is not a target";
+- anything else is treated as decoy traffic.
+
+---
+
+## 3. Redirectors and file-based C2 servers
+
+### 3.1 Build the packages
+
+```sh
+sudo ./redelkctl package                  # all of them
+sudo ./redelkctl package redir1 c2server1 # named hosts only
+sudo ./redelkctl package --no-archive     # directories only, no .tar.gz
+sudo ./redelkctl package -o /tmp/out      # somewhere else
+```
+
+Run it as the same user that ran `install`: the client private keys it copies into the package are
+mode `0640` and owned by whoever generated them.
+
+Each package contains only what that host needs:
+
+```
+build/packages/c2server1/
+├── install.py                  self-contained installer (stdlib only)
+├── manifest.json               everything install.py needs to know
+├── README.md                   per-host instructions
+├── filebeat.yml                main Filebeat config, points at your ingest endpoint
+├── inputs.d/cobaltstrike.yml   only this host's inputs
+├── certs/
+│   ├── redelkCA.crt            to verify the RedELK server
+│   ├── client.crt              only when server.tls.mutual_auth is true
+│   └── client.key
+├── redelk.cron                 file-based C2 only: rsync into the sync user's home
+├── rush.rc                     file-based C2 only: restricted shell for the sync user
+├── redelk_authorized_key.pub   file-based C2 only: the RedELK server's ssh key
+└── scripts/                    file-based C2 only: framework-specific export helpers
+```
+
+### 3.2 Deploy
+
+```sh
+scp build/packages/c2server1.tar.gz c2server1:
+ssh c2server1
+```
+
+```sh
+c2server1$ tar xzf c2server1.tar.gz && cd c2server1
+c2server1$ sudo ./install.py --dry-run     # optional: show what it would change
+c2server1$ sudo ./install.py
+```
+
+The installer:
+
+1. Adds Elastic's APT repository using a **keyring file** in `/etc/apt/keyrings/elastic.asc`
+   (`apt-key` was removed in Debian 12 / Ubuntu 24.04), installs Filebeat at exactly the server's
+   Elastic version, and pins it in `/etc/apt/preferences.d/redelk-filebeat`.
+2. Writes `/etc/filebeat/filebeat.yml`, `/etc/filebeat/inputs.d/` and `/etc/filebeat/certs/`,
+   backing up a pre-existing `filebeat.yml` to `filebeat.yml.pre-redelk`. Inputs left over from an
+   older RedELK install that this host no longer needs are removed.
+3. On a file-based C2 server: installs `rush`, creates the sync user (`scponly` by default) with
+   `rush` as its shell restricted to a read-only `rsync`, authorises the RedELK server's ssh key
+   without removing keys you added, and installs `/etc/cron.d/redelk_<type>` plus the helper
+   scripts in `/usr/share/redelk/bin/`. For Cobalt Strike it also installs `javaobj-py3`, which
+   `exportcsdata.py` needs to read the teamserver's data model.
+4. Starts Filebeat and runs `filebeat test config` and `filebeat test output`.
+
+It is idempotent - run it again after regenerating the package (for example after rotating
+certificates) and it updates in place. `--uninstall` removes what it added; `--no-filebeat` writes
+the configuration without installing or starting Filebeat.
+
+### 3.3 Verify from the host
+
+```sh
+c2server1$ sudo filebeat test config
+c2server1$ sudo filebeat test output
+c2server1$ sudo journalctl -u filebeat -f
+```
+
+and from the RedELK server:
+
+```sh
+./redelkctl doctor
+```
+
+---
+
+## 4. API-based C2 servers (Mythic, Outflank C2)
+
+Nothing is installed on these. Add them to `redelk.yml` with their API credentials and the RedELK
+daemon polls them:
+
+```yaml
+c2_servers:
+  - name: mythic1
+    type: mythic
+    attack_scenario: phishing
+    api:
+      url: https://mythic.example.com:7443
+      token: "<Mythic API token>"
+      verify_tls: true
+      poll_interval: 60
+      download_files: true
+      max_file_size: 104857600
+```
+
+Then:
+
+```sh
+./redelkctl generate      # rewrites config.json
+./redelkctl restart base  # the daemon reads it at start
+./redelkctl doctor        # confirms the API answers and the credentials are accepted
+```
+
+See [c2-integrations.md](c2-integrations.md) for what each API gives you and what it does not, and
+[security.md](security.md) for what these credentials can reach.
+
+---
+
+## 5. When a step fails
+
+| Symptom | Cause and fix |
+|---|---|
+| `redelk.yml not found` | Run `./redelkctl init`, or pass `-c /path/to/redelk.yml`. |
+| `redelk.yml has N problems` | Every problem is listed with its key path. Unknown keys are errors on purpose. |
+| `docker compose was not found` | Install Docker Engine with the Compose v2 plugin. The standalone `docker-compose` works but warns. |
+| `cannot talk to the Docker daemon` | Start Docker, or run as root / a user in the `docker` group. |
+| `vm.max_map_count` FAIL | `sudo sysctl -w vm.max_map_count=262144`, or re-run `install` as root so it persists the setting. |
+| `ports ... already in use` | Only a warning if RedELK is already running. Otherwise stop the other service or change `server.ports`. |
+| Waiting for Elasticsearch times out | `./redelkctl logs elasticsearch`. Usually memory (`ES_HEAP` too large for the host) or a disk watermark. |
+| Waiting for Kibana times out | Kibana waits for `redelk-base` to finish provisioning. `./redelkctl logs base` first, then `logs kibana`. |
+| `missing client certificate ... run './redelkctl generate' first` | You asked to package a host that was added after the last generate. Run `./redelkctl generate`. |
+| `<name> is an API-based C2 server` | Correct: Mythic and Outflank C2 have no package. |
+| Package installs but nothing arrives | See [troubleshooting.md](troubleshooting.md#nothing-is-arriving). |
+
+More failure modes, with the queries to confirm them, are in
+[troubleshooting.md](troubleshooting.md).
+
+---
+
+## Deploying to many hosts with Ansible
+
+[`ansible/`](../ansible/README.md) is a thin remote-execution wrapper around the same
+`redelk.yml` and `./redelkctl`: it runs `redelkctl generate` on the control node, copies the
+repository to the RedELK server and runs `redelkctl install` there, then copies each generated
+package to its host and runs `sudo ./install.py`. It configures nothing of its own - there is no
+second set of variables. Use it when you have more hosts than you want to `scp` to by hand.

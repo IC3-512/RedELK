@@ -1,0 +1,119 @@
+name: Molecule
+
+# Ansible is the optional remote-execution wrapper around redelkctl, so this only runs when the
+# ansible/ tree changes. The Python, Validate and Docker images workflows carry every pull request.
+on:
+  push:
+    branches:
+      - master
+      - develop
+      - "feat/**"
+      - "fix/**"
+    paths:
+      - "ansible/**"
+      - ".github/workflows/molecule.yml"
+  pull_request:
+    paths:
+      - "ansible/**"
+      - ".github/workflows/molecule.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ansible-lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-lint
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "ansible-core==2.20.4" "ansible-lint==26.6.0"
+
+      # ansible-lint resolves every module it sees, so ansible.posix has to be present or the
+      # synchronize tasks fail as "unknown-module".
+      - name: Install Ansible collections
+        working-directory: ansible
+        run: |
+          mkdir -p .ansible/collections
+          ansible-galaxy collection install -r collections.yml -p .ansible/collections
+
+      # --offline: the roles pull no external content, so a galaxy fetch during the lint itself
+      # would only add a network dependency.
+      - name: Run ansible-lint
+        working-directory: ansible
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible/.ansible/collections
+        run: ansible-lint --offline
+
+  molecule:
+    name: Molecule (${{ matrix.scenario }})
+    runs-on: ubuntu-24.04
+    # Only the `docker` scenario runs in CI.
+    #
+    # `redelk` is a three-container deploy of the whole playbook. It was the main safety net while
+    # the installer was shell; now that redelkctl owns generation, what it produces is covered by
+    # tests/ (unit) and tests/e2e (against a real stack), and this scenario mostly re-asserted the
+    # same things through a much slower and more fragile path. It also reads state out of the
+    # working tree it is started from - `build/packages/` from a previous redelkctl run leaks into
+    # the run - which makes it pass or fail depending on what the developer did last.
+    #
+    # The scenario is kept and still works for a deliberate local run:
+    #     cd ansible && molecule test -s redelk
+    # Re-add it here once it builds its packages in isolation.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: docker
+            collections_file: molecule/docker/collections.yml
+    env:
+      ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}/ansible/.ansible/collections
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Molecule dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            "ansible-core==2.20.4" \
+            "molecule==26.3.0" \
+            "molecule-plugins[docker]==25.8.12" \
+            "passlib"
+
+      - name: Install Ansible collections for scenario
+        working-directory: ansible
+        run: |
+          mkdir -p .ansible/collections
+          ansible-galaxy collection install -r "${{ matrix.collections_file }}" -p .ansible/collections
+
+      - name: Validate Ansible collection resolution
+        working-directory: ansible
+        run: |
+          ansible-galaxy collection list community.docker
+          ansible-galaxy collection list ansible.posix
+          ansible-doc community.docker.docker_container > /dev/null
+
+      - name: Run Molecule scenario
+        working-directory: ansible
+        run: molecule test -s "${{ matrix.scenario }}"

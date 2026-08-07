@@ -1,5 +1,9 @@
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
+
+# Every label below is applied by .github/labeler.yml (from the branch name) or by dependabot.
+# Anything that reaches "Other changes" came in on a branch that did not follow the naming
+# convention in CONTRIBUTING.md.
 categories:
   - title: "🚀 Features"
     labels:
@@ -8,21 +12,43 @@ categories:
   - title: "🐛 Bug Fixes"
     labels:
       - "fix"
-      - "bugfix"
       - "bug"
+  - title: "📖 Documentation"
+    labels:
+      - "documentation"
+  - title: "🧹 Maintenance"
+    labels:
+      - "maintenance"
+      - "ci"
+  - title: "📦 Dependencies"
+    labels:
+      - "dependencies"
+    collapse-after: 5
+
+exclude-labels:
+  - "skip-changelog"
+
 change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
-change-title-escapes: '\<*_&' # You can add # and @ to disable mentions, and add ` to disable code blocks.
+change-title-escapes: '\<*_&'
+
 version-resolver:
   major:
     labels:
       - "major"
+      - "breaking"
   minor:
     labels:
       - "minor"
+      - "feature"
   patch:
     labels:
       - "patch"
+      - "fix"
+      - "documentation"
+      - "maintenance"
+      - "dependencies"
   default: patch
+
 template: |
   ## What's new?
 

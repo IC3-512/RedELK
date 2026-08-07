@@ -1,0 +1,60 @@
+---
+# The RedELK repository on the control node: the directory holding redelk.yml and ./redelkctl.
+redelk_repo_path: "{{ playbook_dir | dirname }}"
+
+# The configuration file redelkctl reads, relative to the repository root. It is copied to the
+# server under the same name.
+redelk_config_file: redelk.yml
+
+# Where the repository lands on the RedELK server.
+redelk_remote_base_path: /opt/redelk
+
+# Run './redelkctl install' after copying. Set to false to only refresh the files on the server,
+# for example when you want to start the stack by hand.
+redelk_server_run_install: true
+
+# Extra flags for './redelkctl install', for example ["--pull"] or ["--generate-only"].
+redelk_install_args: []
+
+# What redelkctl needs on the server. The rest of the repository (this ansible tree, the images,
+# the example data, the git history) has no use there and only makes the transfer bigger.
+redelk_server_repo_paths:
+  - redelkctl
+  - VERSION
+  - tools
+  - elkserver
+  - c2servers # the artefact sync scripts that end up in the C2 packages
+  - "{{ redelk_config_file }}"
+  - redelk.secrets.yml
+
+# Paths the server owns. They are seeded from the control node when they do not exist yet, and are
+# never overwritten afterwards:
+#   .env                heap sizes derived from the RAM of the machine redelkctl runs on, which is
+#                       the server and not the control node
+#   *.conf              ip and domain lists, which RedELK keeps in sync with Elasticsearch
+#   redelk-logs/        the daemon's own logs
+#   redelk-www/         screenshots, downloads and other collected artefacts
+#   jupyter-workbooks/  notebooks operators edit
+#   certbot/            Let's Encrypt account and certificate state
+redelk_server_runtime_excludes:
+  - elkserver/.env
+  - elkserver/mounts/redelk-config/etc/redelk/*.conf
+  - elkserver/mounts/redelk-logs/
+  - elkserver/mounts/redelk-www/
+  - elkserver/mounts/jupyter-workbooks/
+  - elkserver/mounts/certbot/
+
+# Never worth copying to a server.
+redelk_server_sync_excludes:
+  - .git
+  - .redelk-venv/ # a virtualenv full of the control node's absolute paths and binaries
+  - __pycache__/
+  - "*.pyc"
+  - .ruff_cache/
+
+# Packages redelkctl needs on the server. Docker itself is the 'docker' role's job.
+#   rsync        receives the repository
+#   python3-venv redelkctl bootstraps its own virtualenv when the dependencies are missing
+redelk_server_prerequisites:
+  - rsync
+  - python3-venv

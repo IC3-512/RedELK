@@ -1,118 +1,161 @@
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 """
 Part of RedELK
 
-Script to load the config file
+Loads /etc/redelk/config.json, which redelkctl generates from redelk.yml.
+
+The previous version merged the user's configuration over the defaults one key deep, so a config
+that specified `{"alarms": {"alarm_dummy": {"interval": 60}}}` produced an alarm entry with no
+"enabled" key - and daemon.py then died with a KeyError that aborted every remaining
+notification. The merge here is recursive, and a malformed file produces a clear message instead
+of a traceback at import time.
 
 Authors:
 - Outflank B.V. / Mark Bergman (@xychix)
 - Lorenzo Bernardi (@fastlorenzo)
+- RedELK contributors
 """
+
+from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
+from typing import Any
 
-with open("/etc/redelk/config.json", encoding="utf-8") as json_data:
-    # pylint: disable=invalid-name
-    data = json.load(json_data)
+CONFIG_PATH = os.environ.get("REDELK_CONFIG", "/etc/redelk/config.json")
 
-# -- logging
-# CRITICAL, 50
-# ERROR, 40
-# WARNING, 30
-# INFO, 20
-# DEBUG, 10
-# NOTSET, 0
-
-LOGLEVEL = logging.WARN
-if "loglevel" in data:
-    LOGLEVEL = data["loglevel"]
-
-# -- directory for cache files (including shelves)
-TEMP_DIR = "/tmp"
-if "tempDir" in data:
-    TEMP_DIR = data["tempDir"]
-
-# -- Notifications
-# pylint: disable=invalid-name
-notifications = {
-    "email": {
-        "enabled": False,
-        "smtp": {"host": "localhost", "port": 25, "login": "", "pass": ""},
-        "from": "",
-        "to": [],
+DEFAULTS: dict[str, Any] = {
+    "loglevel": "WARNING",
+    "interval": 60,
+    "tempDir": "/tmp",
+    "project_name": "redelk-project",
+    "es_connection": ["https://redelk-elasticsearch:9200"],
+    "es_ca_certs": "/etc/redelk/certs/ca/ca.crt",
+    "c2_servers": [],
+    "notifications": {
+        "email": {
+            "enabled": False,
+            "smtp": {
+                "host": "localhost",
+                "port": 25,
+                "tls": "starttls",
+                "login": "",
+                "pass": "",
+            },
+            "from": "",
+            "to": [],
+        },
+        "msteams": {"enabled": False, "webhook_url": ""},
+        "slack": {"enabled": False, "webhook_url": ""},
     },
-    "msteams": {"enabled": False, "webhook_url": ""},
-    "slack": {"enabled": False, "webhook_url": ""},
-}
-if "notifications" in data:
-    for n in data["notifications"]:
-        notifications[n] = data["notifications"][n]
-
-# -- Alarms
-# pylint: disable=invalid-name
-alarms = {
-    "alarm_filehash": {
-        "enabled": False,
-        "interval": 300,
-        # Virustotal API
-        "vt_api_key": "",
-        # IBM X-Force API (can be retreived from a sample call on their swagger test site)
-        "ibm_basic_auth": "",
-        # Hybrid Analysis API
-        "ha_api_key": "",
+    "alarms": {
+        "alarm_filehash": {
+            "enabled": False,
+            "interval": 300,
+            "vt_api_key": "",
+            "ibm_basic_auth": "",
+            "ha_api_key": "",
+        },
+        "alarm_httptraffic": {
+            "enabled": False,
+            "interval": 310,
+            # Do not notify about the same source IP more than once a day.
+            "notify_interval": 86400,
+        },
+        "alarm_useragent": {"enabled": False, "interval": 320},
+        "alarm_backendalarm": {"enabled": False, "interval": 320},
+        "alarm_dummy": {"enabled": False, "interval": 300},
+        "alarm_manual": {"enabled": False, "interval": 300},
     },
-    "alarm_httptraffic": {
-        "enabled": False,
-        "interval": 310,
-        "notify_interval": 86400,  # Only notify on the same IP hit every 24h by default
-        "backend_filter": "c2*",
-    },
-    "alarm_useragent": {"enabled": False, "interval": 320},
-    "alarm_dummy": {"enabled": False, "interval": 300},
-    "alarm_manual": {"enabled": False, "interval": 300},
-    "alarm_backendalarm": {"enabled": False, "interval": 320},
-}
-if "alarms" in data:
-    for a in data["alarms"]:
-        alarms[a] = data["alarms"][a]
-
-# -- Enrichments modules
-# pylint: disable=invalid-name
-enrich = {
-    "enrich_csbeacon": {"enabled": True, "interval": 300},
-    "enrich_stage1": {"enabled": True, "interval": 300},
-    "enrich_sliver": {"enabled": True, "interval": 300},
-    "enrich_mythic": {"enabled": True, "interval": 300},
-    "enrich_mythic_downloads": {"enabled": True, "interval": 300},
-    "enrich_greynoise": {
-        "enabled": True,
-        "interval": 310,
-        "cache": 86400,  # Only query for the same IP hit every 24h by default
-        # Greynoise Community API Key - Default RedELK key if none provided
-        "api_key": "cEwJeLyDkNSXzabKNvzJSzZjZW0xEJYSYvf2nfhmmaXQHfCA8bJb49AvI3DF5Tlx",
-    },
-    "enrich_tor": {"enabled": True, "interval": 320, "cache": 3600},
-    "enrich_iplists": {"enabled": True, "interval": 330},
-    "enrich_synciplists": {"enabled": True, "interval": 360},
-    "enrich_syncdomainslists": {"enabled": True, "interval": 355},
-    "enrich_domainscategorization": {
-        "enabled": True,
-        "interval": 345,
-        # IBM X-Force API (can be retreived from a sample call on their swagger test site)
-        "ibm_basic_auth": "",
-        # Virustotal API
-        "vt_api_key": "",
+    "enrich": {
+        "enrich_csbeacon": {"enabled": True, "interval": 300},
+        "enrich_stage1": {"enabled": True, "interval": 300},
+        "enrich_sliver": {"enabled": True, "interval": 300},
+        "enrich_mythic": {"enabled": False, "interval": 60},
+        "enrich_outflankc2": {"enabled": False, "interval": 60},
+        "enrich_ttp": {"enabled": True, "interval": 120},
+        # No shared API key any more: RedELK used to ship one GreyNoise community key for every
+        # install, which everyone shared and quickly exhausted.
+        "enrich_greynoise": {"enabled": False, "interval": 310, "cache": 86400, "api_key": ""},
+        "enrich_tor": {"enabled": True, "interval": 360, "cache": 3600},
+        "enrich_iplists": {"enabled": True, "interval": 30},
+        "enrich_synciplists": {"enabled": True, "interval": 360},
+        "enrich_syncdomainslists": {"enabled": True, "interval": 355},
+        "enrich_domainscategorization": {
+            "enabled": False,
+            "interval": 345,
+            "ibm_basic_auth": "",
+            "vt_api_key": "",
+        },
     },
 }
-if "enrich" in data:
-    for e in data["enrich"]:
-        enrich[e] = data["enrich"][e]
+
+LOGLEVELS = {"CRITICAL", "ERROR", "WARNING", "WARN", "INFO", "DEBUG", "NOTSET"}
+
+
+def _merge(defaults: Any, override: Any) -> Any:
+    if isinstance(defaults, dict) and isinstance(override, dict):
+        merged = dict(defaults)
+        for key, value in override.items():
+            merged[key] = _merge(defaults.get(key), value) if key in defaults else value
+        return merged
+    return override if override is not None else defaults
+
+
+def _load() -> dict[str, Any]:
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as handle:
+            user_config = json.load(handle)
+    except FileNotFoundError:
+        print(
+            f"[X] {CONFIG_PATH} not found. It is generated by './redelkctl generate' on the "
+            "RedELK server from redelk.yml.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
+    except json.JSONDecodeError as error:
+        print(f"[X] {CONFIG_PATH} is not valid JSON: {error}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+    if not isinstance(user_config, dict):
+        print(f"[X] {CONFIG_PATH} must contain a JSON object", file=sys.stderr)
+        raise SystemExit(1)
+
+    return _merge(DEFAULTS, user_config)
+
+
+data = _load()
 
 # pylint: disable=invalid-name
-es_connection = ["http://localhost:9200"]
-if "es_connection" in data:
-    es_connection = data["es_connection"]
+_loglevel = str(data.get("loglevel", "WARNING")).upper()
+if _loglevel not in LOGLEVELS:
+    logging.getLogger("config").warning(
+        "invalid loglevel %r in %s; using WARNING", data.get("loglevel"), CONFIG_PATH
+    )
+    _loglevel = "WARNING"
+LOGLEVEL = getattr(logging, "WARNING" if _loglevel == "WARN" else _loglevel, logging.WARNING)
 
-project_name = data["project_name"] if "project_name" in data else "redelk-project"
+TEMP_DIR = data.get("tempDir", "/tmp")
+INTERVAL = int(data.get("interval", 60))
+
+notifications = data["notifications"]
+alarms = data["alarms"]
+enrich = data["enrich"]
+
+es_connection = data["es_connection"]
+es_ca_certs = data.get("es_ca_certs") or ""
+if es_ca_certs and not os.path.isfile(es_ca_certs):
+    es_ca_certs = ""
+
+project_name = data.get("project_name", "redelk-project")
+
+# API-based C2 servers (Mythic, Outflank C2). Each entry carries its own credentials and polling
+# settings; see tools/redelk_setup/config.py:as_daemon_config for the shape.
+c2_servers = data.get("c2_servers", [])
+
+
+def c2_servers_of_type(c2_type: str) -> list[dict[str, Any]]:
+    """The configured API-based C2 servers of one type."""
+    return [server for server in c2_servers if server.get("type") == c2_type]

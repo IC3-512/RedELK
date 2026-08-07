@@ -1,100 +1,74 @@
 {
-    "aliases": {},
-    "index_patterns": [
-        "redelk-*"
-    ],
+  "index_patterns": [
+    "redelk-*"
+  ],
+  "priority": 200,
+  "composed_of": [],
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "redelk",
+      "index.number_of_shards": 1,
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "5s",
+      "index.mapping.total_fields.limit": 10000
+    },
     "mappings": {
-        "_routing": {
-            "required": false
+      "dynamic": true,
+      "date_detection": false,
+      "numeric_detection": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
         },
-        "_source": {
-            "enabled": true,
-            "excludes": [],
-            "includes": []
-        },
-        "date_detection": true,
-        "dynamic": true,
-        "dynamic_date_formats": [
-            "strict_date_optional_time",
-            "yyyy/MM/dd HH:mm:ss Z||yyyy/MM/dd Z"
-        ],
-        "dynamic_templates": [],
-        "numeric_detection": true,
-        "properties": {
-            "@timestamp": {
-                "type": "date"
-            },
-            "iplist": {
-                "properties": {
-                    "comments": {
-                        "type": "text"
-                    },
-                    "ip": {
-                        "coerce": true,
-                        "index": true,
-                        "store": false,
-                        "type": "ip_range"
-                    },
-                    "name": {
-                        "type": "keyword"
-                    },
-                    "source": {
-                        "type": "keyword"
-                    }
+        "module": {
+          "properties": {
+            "last_run": {
+              "properties": {
+                "count": {
+                  "type": "long"
                 },
-                "type": "object"
-            },
-            "module": {
-                "properties": {
-                    "last_run": {
-                        "dynamic": true,
-                        "enabled": true,
-                        "properties": {
-                            "message": {
-                                "type": "text"
-                            },
-                            "status": {
-                                "type": "keyword"
-                            },
-                            "timestamp": {
-                                "doc_values": true,
-                                "ignore_malformed": false,
-                                "index": true,
-                                "store": false,
-                                "type": "date"
-                            }
-                        },
-                        "type": "object"
-                    },
-                    "name": {
-                        "type": "keyword"
-                    },
-                    "type": {
-                        "type": "keyword"
+                "message": {
+                  "type": "keyword",
+                  "ignore_above": 1024,
+                  "fields": {
+                    "text": {
+                      "type": "text",
+                      "norms": false
                     }
+                  }
                 },
-                "type": "object"
+                "status": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "timestamp": {
+                  "type": "date"
+                }
+              }
+            },
+            "name": {
+              "type": "keyword",
+              "ignore_above": 1024
             },
             "type": {
-                "type": "keyword"
+              "type": "keyword",
+              "ignore_above": 1024
             }
+          }
+        },
+        "type": {
+          "type": "keyword",
+          "ignore_above": 1024
         }
-    },
-    "order": 0,
-    "settings": {
-        "index": {
-            "mapping": {
-                "total_fields": {
-                    "limit": "10000"
-                }
-            },
-            "number_of_replicas": "0",
-            "number_of_shards": "1",
-            "query": {
-                "default_field": "*"
-            },
-            "refresh_interval": "5s"
-        }
-    },
-    "version": 1
+      }
+    }
+  },
+  "_meta": {
+    "managed_by": "redelk",
+    "description": "Bookkeeping for the RedELK daemon: redelk-modules holds one document per alarm/enrich module recording its last run. numeric_detection is off because it turns any numeric-looking string into a long and then rejects the next document that puts a non-numeric value in the same field. The IP and domain lists live under redelk-iplist-* and redelk-domainslist-*, which are claimed by their own higher priority templates.",
+    "authors": [
+      "Outflank B.V. / Marc Smeets",
+      "Lorenzo Bernardi (@fastlorenzo)"
+    ]
+  }
 }

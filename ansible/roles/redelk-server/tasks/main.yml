@@ -1,0 +1,88 @@
+---
+# Copy the repository to the RedELK server and let redelkctl do the work there. This role renders
+# nothing: every file it puts on the server was produced by './redelkctl generate' on the control
+# node, and './redelkctl install' regenerates whatever is host specific.
+
+- name: Install the packages redelkctl needs
+  ansible.builtin.apt:
+    name: "{{ redelk_server_prerequisites }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['pkg_mgr'] == 'apt'
+
+- name: Warn when the prerequisites cannot be installed automatically
+  ansible.builtin.debug:
+    msg: >-
+      This host uses {{ ansible_facts['pkg_mgr'] }} rather than apt. Install rsync and a python3
+      with the venv module by hand; the rest of this role does not care which distribution it is.
+  when: ansible_facts['pkg_mgr'] != 'apt'
+
+# The tree holds redelk.secrets.yml, the RedELK CA key and the per-host client keys.
+- name: Create the RedELK directory
+  ansible.builtin.file:
+    path: "{{ redelk_remote_base_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Copy the RedELK repository to the server
+  vars:
+    redelk_server_excludes: >-
+      {{ (redelk_server_sync_excludes + redelk_server_runtime_excludes)
+         | map('regex_replace', '^', '--exclude=') | list }}
+  ansible.posix.synchronize:
+    src: "{{ redelk_repo_path }}/{{ item }}"
+    dest: "{{ redelk_remote_base_path }}/"
+    archive: true
+    # Deleting is not safe here: docker compose bind-mounts parts of this tree, and RedELK writes
+    # into it while it runs.
+    delete: false
+    # --ignore-missing-args  redelk.secrets.yml does not exist until redelkctl has run once
+    # --checksum --no-times  compare content, not timestamps. redelkctl rewrites a few files with
+    #                        identical content on every 'generate' (the CA copy the beats input
+    #                        serves, for one), and a deploy should only report a change when
+    #                        something actually changed.
+    rsync_opts: "{{ ['--ignore-missing-args', '--checksum', '--no-times'] + redelk_server_excludes }}"
+    # ansible.posix rewrites this to 'sudo rsync' when it is not set and become is on, which is
+    # what a non-root login needs in order to write the root-owned tree. A root login already has
+    # the privileges and should not depend on sudo being installed.
+    rsync_path: "{{ 'rsync' if (ansible_user | default('')) == 'root' else omit }}"
+  loop: "{{ redelk_server_repo_paths }}"
+
+- name: Seed the directories RedELK writes to at runtime
+  ansible.posix.synchronize:
+    src: "{{ redelk_repo_path }}/elkserver/mounts"
+    dest: "{{ redelk_remote_base_path }}/elkserver/"
+    archive: true
+    delete: false
+    # The pass above skips these paths so that a redeploy cannot throw away collected artefacts or
+    # the ip lists RedELK synchronises with Elasticsearch. --ignore-existing puts them there on a
+    # first install and touches nothing that is already on the server. --no-times keeps rsync from
+    # restamping directories whose mtime moved when redelkctl rewrote a file inside them, which
+    # would otherwise report a change on every run.
+    rsync_opts:
+      - --ignore-existing
+      - --no-times
+    rsync_path: "{{ 'rsync' if (ansible_user | default('')) == 'root' else omit }}"
+
+# redelkctl regenerates everything that is host specific, checks the host prerequisites and starts
+# the stack. It is idempotent, but it always runs 'docker compose up -d', so 'changed' here means
+# "a configuration file on the server was rewritten" - run './redelkctl status' or './redelkctl
+# doctor' on the server to see what the containers are doing.
+- name: Deploy RedELK with redelkctl
+  ansible.builtin.command:
+    argv: "{{ ['./redelkctl', '--config', redelk_config_file, 'install'] + redelk_install_args }}"
+    chdir: "{{ redelk_remote_base_path }}"
+  register: redelk_server_install
+  # "N file(s) written, M unchanged" is redelkctl's own summary. The character class matches
+  # exactly "0 written" and not "10 written", and avoids backslashes, which Jinja and YAML
+  # disagree about often enough to be worth designing around.
+  changed_when: redelk_server_install.stdout is not search('[^0-9]0 file[(]s[)] written')
+  when: redelk_server_run_install | bool
+
+- name: Show the RedELK deployment summary
+  ansible.builtin.debug:
+    var: redelk_server_install.stdout_lines
+  when: redelk_server_install.stdout_lines is defined

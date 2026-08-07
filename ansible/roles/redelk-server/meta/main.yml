@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  author: RedELK
+  description: Copy the RedELK repository to the server and run './redelkctl install' there.
+  license: BSD-3-Clause
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+  galaxy_tags:
+    - redelk
+
+dependencies: []

@@ -1,0 +1,18 @@
+{{ header }}
+# rush(1) restricted shell for the scponly user.
+#
+# The RedELK server logs in as this user to rsync C2 artefacts. rush restricts it to exactly one
+# command: an rsync in --server --sender (read-only, outbound) mode, rooted at the user's home
+# directory, with path traversal denied.
+
+debug 1
+
+rule rsync
+  command ^rsync --server --sender
+  uid >= 1000
+  set[0] /usr/bin/rsync
+  match[$] ^~/.*
+  match[$] ! \.\.
+  transform[$] s,^~/,./,
+  umask 002
+  chdir ~

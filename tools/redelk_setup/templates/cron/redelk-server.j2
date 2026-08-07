@@ -1,0 +1,29 @@
+{{ header }}
+# Periodic jobs inside the redelk-base container.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+{% if jobs %}
+# Pull C2 artefacts (screenshots, downloads, keystrokes) from the file-based C2 servers.
+# m h dom mon dow user command
+{% for job in jobs %}
+*/2 * * * * redelk /usr/bin/python3 /usr/share/redelk/bin/getremotelogs.py {{ job.host }} {{ job.name }} {{ job.user }} {{ job.port }}
+{% endfor %}
+{% else %}
+# No file-based C2 servers are configured, so there is nothing to rsync. API-based C2 servers
+# (Mythic, Outflank C2) are polled by the RedELK daemon instead.
+{% endif %}
+
+# Refresh the Tor exit node list used by the tor enrichment module.
+17 * * * * redelk /usr/bin/python3 /usr/share/redelk/bin/run_torexitnodeupdate.py
+
+# Refresh the list of domains implants should never talk to.
+00 00,12 * * * redelk /usr/bin/python3 /usr/share/redelk/bin/run_roguedomainsupdate.py
+
+# Create thumbnails for screenshots pulled from the C2 servers.
+*/1 * * * * redelk /usr/bin/python3 /usr/share/redelk/bin/makethumbnail.py /var/www/html/c2logs/
+
+# Alarms, enrichment, C2 API polling and notifications. daemon.py takes its own lock, so a run
+# that overruns the minute simply skips the next tick.
+* * * * * redelk /usr/bin/python3 /usr/share/redelk/bin/daemon.py

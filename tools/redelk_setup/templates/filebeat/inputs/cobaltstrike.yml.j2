@@ -1,0 +1,151 @@
+{{ header }}
+# Cobalt Strike teamserver logs.
+#
+# Uses the filestream input (the `log` input has been deprecated since 7.16 and is scheduled for
+# removal). Each input needs a stable, unique id - changing it makes Filebeat re-read the files.
+
+{% set base = base_path or '/root/cobaltstrike/server' %}
+{% set cs_multiline = '(^\\d\\d\\/\\d\\d\\s\\d\\d:\\d\\d:\\d\\d\\sUTC\\s\\[)|(^\\d\\d\\/\\d\\d\\s\\d\\d:\\d\\d:\\d\\d\\s\\[)' %}
+
+- type: filestream
+  id: cobaltstrike-events
+  enabled: true
+  paths:
+    - {{ base }}/logs/*/events.log
+  prospector.scanner.check_interval: 5s
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: events
+
+- type: filestream
+  id: cobaltstrike-weblog
+  enabled: true
+  paths:
+    - {{ base }}/logs/*/weblog*
+  prospector.scanner.check_interval: 5s
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: weblog
+
+- type: filestream
+  id: cobaltstrike-downloads
+  enabled: true
+  paths:
+    - {{ base }}/logs/*/downloads.log
+  prospector.scanner.check_interval: 5s
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: downloads
+
+- type: filestream
+  id: cobaltstrike-credentials
+  enabled: true
+  paths:
+    - {{ base }}/data/export_credentials.tsv
+  prospector.scanner.check_interval: 5s
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: credentials
+
+- type: filestream
+  id: cobaltstrike-beacon
+  enabled: true
+  paths:
+    - {{ base }}/logs/*/*/beacon_*.log
+    - {{ base }}/logs/*/*/ssh_*.log
+  prospector.scanner.check_interval: 5s
+  parsers:
+    # Cobalt Strike changed its timestamp format in 3.14; match "06/19 12:32:56 UTC [" as well
+    # as the older "06/19 12:32:56 [".
+    - multiline:
+        type: pattern
+        pattern: '{{ cs_multiline }}'
+        negate: true
+        match: after
+        max_lines: 100000
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: beacon
+
+- type: filestream
+  id: cobaltstrike-keystrokes
+  enabled: true
+  paths:
+    - {{ base }}/logs/*/*/keystrokes/keystrokes_*.txt
+  prospector.scanner.check_interval: 5s
+  parsers:
+    - multiline:
+        type: pattern
+        pattern: '{{ cs_multiline }}'
+        negate: true
+        match: after
+        max_lines: 100000
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: keystrokes
+
+- type: filestream
+  id: cobaltstrike-screenshots
+  enabled: true
+  paths:
+    - {{ base }}/logs/*/*/screenshots.log
+  prospector.scanner.check_interval: 5s
+  parsers:
+    - multiline:
+        type: pattern
+        pattern: '{{ cs_multiline }}'
+        negate: true
+        match: after
+        max_lines: 100000
+  fields_under_root: true
+  fields:
+    infra:
+      attack_scenario: {{ attack_scenario | to_yaml_scalar }}
+      log:
+        type: rtops
+    c2:
+      program: cobaltstrike
+      log:
+        type: screenshots

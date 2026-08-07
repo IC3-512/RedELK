@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MIT-0
+---
+# No role defaults: which packages, which repository and which service state are not decisions an
+# operator should have to make. The one table this role does need - the distributions and releases
+# Docker publishes packages for - lives in vars/main.yml, where nothing overrides it by accident.
+#
+# Whether this role runs at all is redelk_install_docker, in group_vars/elkservers.yml.

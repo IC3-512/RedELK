@@ -1,0 +1,50 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: ci
+
+  # redelkctl - runs on the operator's machine, so keep it boring and current.
+  - package-ecosystem: pip
+    directory: /tools
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - setup
+    commit-message:
+      prefix: deps
+
+  # The RedELK daemon inside the redelk-base image. The elasticsearch client must stay on the
+  # major of the Elastic stack RedELK deploys, so it is only updated by hand.
+  - package-ecosystem: pip
+    directory: /elkserver/docker/redelk-base/redelkinstalldata/scripts
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: deps
+    ignore:
+      - dependency-name: elasticsearch
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: docker
+    directories:
+      - /elkserver/docker/redelk-base
+      - /elkserver/docker/redelk-jupyter
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: deps

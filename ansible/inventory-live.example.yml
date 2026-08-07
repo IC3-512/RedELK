@@ -1,0 +1,43 @@
+---
+####################################################################################################
+# RedELK inventory for a real deployment - copy to inventory-live.yml and edit.
+#
+# Same rule as inventory.yml: every host in c2servers and redirs must be named exactly like the
+# matching 'name' in ../redelk.yml, because that name selects build/packages/<name>/.
+#
+# The redelk.yml this lines up with:
+#
+#   c2_servers:
+#     - name: c2-live-01
+#       type: cobaltstrike
+#       host: 203.0.113.20            # where the RedELK server pulls artefacts from over ssh
+#       paths:
+#         base: /root/cobaltstrike/server
+#   redirectors:
+#     - name: redir-live-01
+#       type: haproxy
+#
+# Note that redelk.yml 'host' and inventory 'ansible_host' answer different questions:
+# redelk.yml says where the RedELK SERVER reaches the C2 server, ansible_host says where the
+# ANSIBLE CONTROL NODE reaches it. They are often, but not always, the same address.
+####################################################################################################
+
+elkservers:
+  hosts:
+    redelk-live-01:
+      ansible_host: 203.0.113.10
+      ansible_user: ubuntu
+
+c2servers:
+  hosts:
+    c2-live-01:
+      ansible_host: 203.0.113.20
+      ansible_user: root
+
+redirs:
+  hosts:
+    redir-live-01:
+      ansible_host: 203.0.113.30
+      ansible_user: root
+      # This redirector is only reachable through the C2 server.
+      ansible_ssh_common_args: -o ProxyJump=root@203.0.113.20

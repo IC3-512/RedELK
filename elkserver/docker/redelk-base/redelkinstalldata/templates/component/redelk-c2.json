@@ -1,0 +1,284 @@
+{
+  "template": {
+    "mappings": {
+      "properties": {
+        "c2": {
+          "properties": {
+            "command": {
+              "properties": {
+                "arguments": {
+                  "type": "flattened"
+                },
+                "name": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            },
+            "implant": {
+              "type": "flattened"
+            },
+            "listener": {
+              "properties": {
+                "bind_port": {
+                  "type": "long"
+                },
+                "domains": {
+                  "type": "keyword",
+                  "ignore_above": 1024,
+                  "fields": {
+                    "text": {
+                      "type": "text",
+                      "norms": false
+                    }
+                  }
+                },
+                "host": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "name": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "port": {
+                  "type": "long"
+                },
+                "profile": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "proxy": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "type": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            },
+            "log": {
+              "properties": {
+                "type": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            },
+            "message": {
+              "type": "text",
+              "norms": false,
+              "fields": {
+                "keyword": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            },
+            "operation": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "operator": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "operator_ip": {
+              "type": "ip",
+              "ignore_malformed": true
+            },
+            "program": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "server": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "task": {
+              "properties": {
+                "completed": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
+                "status": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            },
+            "timestamp": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        },
+        "creds": {
+          "properties": {
+            "credential": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "host": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "realm": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "source": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "username": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        },
+        "implant": {
+          "properties": {
+            "arch": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "checkin": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "child_id": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "external_ip": {
+              "type": "ip",
+              "ignore_malformed": true
+            },
+            "id": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "input": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
+            },
+            "integrity_level": {
+              "type": "long"
+            },
+            "kill_date": {
+              "type": "date",
+              "format": "strict_date_optional_time||yyyy-MM-dd HH:mm:ss||epoch_millis",
+              "ignore_malformed": true
+            },
+            "link_mode": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "linked": {
+              "type": "boolean"
+            },
+            "log_file": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "name": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "operator": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "output": {
+              "type": "text",
+              "norms": false
+            },
+            "parent_id": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "process_user": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "sleep": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "task": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
+            },
+            "task_id": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "task_parameters": {
+              "type": "keyword",
+              "ignore_above": 1024,
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "norms": false
+                }
+              }
+            },
+            "url": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        },
+        "ioc": {
+          "properties": {
+            "type": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "value": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        },
+        "service": {
+          "properties": {
+            "name": {
+              "type": "keyword",
+              "ignore_above": 1024
+            },
+            "type": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "managed_by": "redelk",
+    "description": "The C2 field family, shared by rtops-*, implantsdb and credentials-* so that the file based C2s (through logstash) and the API based Mythic and Outflank C2 connectors cannot drift apart. c2.command.arguments and c2.implant are flattened: Sliver renames whole gRPC request and session objects into them, and without a bound the field count of rtops-* grows with every new Sliver command. c2.timestamp and implant.checkin are keywords rather than dates because the file based C2s write mutually incompatible free text there - Cobalt Strike's c2.timestamp has no year at all ('05/14 12:33:44') and its implant.checkin is a sentence ('host called home, sent: 16 bytes'); the parsed event time lives in @timestamp.",
+    "authors": [
+      "Outflank B.V. / Marc Smeets",
+      "Lorenzo Bernardi (@fastlorenzo)"
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+####################################################################################################
+# redelk.yml for the molecule scenario.
+#
+# The names below are the point of the test: 'c2server1' and 'redir1' are also the names of the
+# molecule platforms, which is what makes build/packages/c2server1/ end up on the c2server1
+# container. Change one and the run must fail in the redelk-generate role.
+#
+# sliver rather than cobaltstrike: its installer needs no extra python packages, which keeps the
+# scenario off PyPI. Nothing here is a real address or a real credential.
+####################################################################################################
+version: 3
+
+project:
+  name: redelk-molecule
+  attack_scenario: molecule
+
+server:
+  hostnames:
+    - redelk.molecule.test
+  profile: limited
+  tls:
+    mode: self-signed
+    mutual_auth: true
+
+elastic:
+  version: "9.5.0"
+
+c2_servers:
+  - name: c2server1
+    type: sliver
+    host: 198.51.100.20
+    paths:
+      base: /root/.sliver
+
+redirectors:
+  - name: redir1
+    type: haproxy
+
+# The modules that need a threat intelligence key have to be switched off explicitly: redelkctl
+# refuses a configuration that enables them without one, and molecule has no keys to give.
+modules:
+  alarms:
+    filehash: {enabled: false}
+  enrich:
+    greynoise: {enabled: false}
+    domainscategorization: {enabled: false}

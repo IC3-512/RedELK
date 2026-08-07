@@ -1,0 +1,123 @@
+---
+# Exercises the whole thin wrapper: 'redelkctl generate' on the control node against
+# files/redelk.yml, the repository copy to the server, and the package install on a C2 server and
+# a redirector. Converge runs ../../playbook.yml itself, so what is tested is what operators run.
+dependency:
+  name: galaxy
+  enabled: false
+
+driver:
+  name: docker
+
+platforms:
+  - name: elkserver-01
+    hostname: elkserver-01
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+    environment:
+      container: docker
+    groups:
+      - elkservers
+
+  # The two names below must match the c2_servers and redirectors names in files/redelk.yml: that
+  # is how a host is matched to its installation package.
+  - name: c2server1
+    hostname: c2server1
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+    environment:
+      container: docker
+    groups:
+      - c2servers
+
+  - name: redir1
+    hostname: redir1
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+    environment:
+      container: docker
+    groups:
+      - redirs
+
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/roles
+    ANSIBLE_COLLECTIONS_PATH: ${MOLECULE_PROJECT_DIRECTORY}/.ansible/collections:${HOME}/.ansible/collections
+  config_options:
+    defaults:
+      host_key_checking: false
+      become: false
+      remote_tmp: /tmp/.ansible/tmp
+  inventory:
+    group_vars:
+      all:
+        ansible_user: root
+        ansible_become: true
+        ansible_python_interpreter: /usr/bin/python3
+        # A throwaway copy of the repository with files/redelk.yml in it, so a molecule run never
+        # touches the working tree it was started from. Built by prepare.yml.
+        redelk_repo_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/repo"
+        redelk_remote_base_path: /opt/redelk
+      elkservers:
+        # Docker in Docker is out of scope: this scenario proves that the repository arrives
+        # complete and that redelkctl runs on the server, not that Elasticsearch boots in a
+        # container. verify.yml runs './redelkctl validate' on the host instead.
+        redelk_install_docker: false
+        redelk_server_run_install: false
+      c2servers:
+        # Filebeat is pinned to the exact Elastic version in redelk.yml, so installing it would
+        # make the scenario depend on artifacts.elastic.co shipping that exact build. Everything
+        # else the installer does still runs.
+        redelk_client_install_args:
+          - --no-filebeat
+      redirs:
+        redelk_client_install_args:
+          - --no-filebeat
+  playbooks:
+    create: create.yml
+    destroy: destroy.yml
+    cleanup: cleanup.yml
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+
+scenario:
+  name: redelk
+  test_sequence:
+    - cleanup
+    - destroy
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - cleanup
+    - destroy
+
+verifier:
+  name: ansible

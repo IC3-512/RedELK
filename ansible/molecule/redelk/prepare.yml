@@ -1,0 +1,91 @@
+---
+- name: Build a throwaway RedELK repository for the scenario
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
+    repo_root: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | dirname }}"
+    molecule_repo: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/repo"
+  tasks:
+    - name: Reset the throwaway repository
+      ansible.builtin.file:
+        path: "{{ molecule_repo }}"
+        state: absent
+
+    - name: Create the throwaway repository
+      ansible.builtin.file:
+        path: "{{ molecule_repo }}"
+        state: directory
+        mode: "0700"
+
+    # Only what redelkctl needs, and none of the artefacts a developer's own './redelkctl generate'
+    # left behind - the scenario must start from the same state on a laptop and on a CI runner.
+    - name: Copy the repository
+      ansible.posix.synchronize:
+        src: "{{ repo_root }}/{{ item }}"
+        dest: "{{ molecule_repo }}/"
+        archive: true
+        rsync_opts:
+          - --exclude=.redelk-venv/
+          - --exclude=__pycache__/
+          - --exclude=*.pyc
+          - --exclude=elkserver/.env
+          - --exclude=elkserver/mounts/certs/
+          - --exclude=elkserver/mounts/certbot/
+          - --exclude=elkserver/mounts/nginx-certs/
+          - --exclude=elkserver/mounts/redelk-ssh/
+          - --exclude=elkserver/mounts/logstash-config/certs_inputs/
+          - --exclude=elkserver/mounts/logstash-config/certs_clients/
+          - --exclude=elkserver/mounts/redelk-config/etc/redelk/config.json
+          - --exclude=elkserver/mounts/redelk-config/etc/redelk/*.conf
+          - --exclude=elkserver/mounts/nginx-config/htpasswd.users.template
+      loop:
+        - redelkctl
+        - VERSION
+        - tools
+        - elkserver
+        - c2servers
+
+    # An absolute path on purpose. A bare `src: redelk.yml` is resolved against Ansible's search
+    # path, which includes the project directory - so on a developer machine that has its own
+    # (gitignored) redelk.yml in the repository root, the scenario silently deployed that one and
+    # then failed on assertions about a configuration it never installed.
+    - name: Install the scenario's redelk.yml
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/files/redelk.yml"
+        dest: "{{ molecule_repo }}/redelk.yml"
+        mode: "0600"
+
+- name: Prepare the RedELK server container
+  hosts: elkservers
+  gather_facts: true
+  become: true
+  tasks:
+    # With these present redelkctl skips its virtualenv bootstrap, which keeps the scenario off
+    # PyPI. The role installs rsync itself; installing it here as well keeps prepare honest about
+    # what the container needs before anything is copied to it.
+    - name: Install redelkctl's dependencies from the distribution
+      ansible.builtin.apt:
+        name:
+          - rsync
+          - python3-yaml
+          - python3-jinja2
+          - python3-cryptography
+        state: present
+        update_cache: true
+
+- name: Prepare the shipper containers
+  hosts: c2servers:redirs
+  gather_facts: true
+  become: true
+  tasks:
+    # install.py apt-gets rush when it is missing, and the images ship with an empty apt cache.
+    - name: Install the restricted shell used by the C2 sync account
+      ansible.builtin.apt:
+        name:
+          - rush
+        state: present
+        update_cache: true
+      when: "'c2servers' in group_names"

@@ -1,0 +1,131 @@
+name: End-to-end
+
+# Brings up a real RedELK with ./redelkctl and runs the e2e tier against it (see docs/testing.md).
+#
+# Deliberately NOT on pull_request. The job builds redelk-base, pulls the Elastic images, starts
+# five containers and waits for Elasticsearch and Kibana: twenty minutes and several gigabytes of
+# downloads per run, on a runner with 16GB of RAM and no cache between runs. Making every pull
+# request pay that would push contributors to skip CI, and the tier's job - catching the "installs
+# cleanly, renders nothing" class of regression - is a release-time question, not a per-commit one.
+# The fast tier (`pytest tests`) does run on every push and pull request, in python.yml.
+#
+# Run it by hand from the Actions tab (workflow_dispatch) before cutting a release, and read it
+# nightly.
+on:
+  schedule:
+    # 03:17 UTC. Off the hour because scheduled workflows queue behind everything that fires at
+    # :00, which on a busy day means an hour of drift.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # One stack per runner: the install binds ports 80, 443 and 5044 and always uses the compose
+  # project name "redelk", so two of these on the same runner would fight over both.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Install and ingest
+    runs-on: ubuntu-24.04
+    # Building and pulling the images is the slow part and is not cached between runs. 75 minutes
+    # is roughly three times a healthy run, so a hang is caught without killing a slow one.
+    timeout-minutes: 75
+
+    # E2E_CONFIG is exported by the staging step below rather than declared here: the `runner`
+    # context is not available to a workflow- or job-level `env:`, only inside a step. Using it
+    # here made GitHub refuse to load the file, which shows up as a failed run on every push -
+    # on a workflow that is not even supposed to run on push.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pip install --disable-pip-version-check -r tools/requirements.txt
+
+      - name: Show what the runner has
+        run: |
+          docker version
+          docker compose version
+          free -m
+          df -h /
+
+      # The deployment is installed from a copy of the fixture configuration. The copy keeps the
+      # tracked file untouched: the Mythic seeding fixture rewrites the redelk.yml it is given
+      # (api.url has to point at the fake server), and redelk.secrets.yml is written next to it.
+      - name: Stage the e2e configuration
+        run: |
+          mkdir -p "${RUNNER_TEMP}/redelk-e2e"
+          cp tests/e2e/fixtures/redelk.e2e.yml "${RUNNER_TEMP}/redelk-e2e/redelk.yml"
+          echo "E2E_CONFIG=${RUNNER_TEMP}/redelk-e2e/redelk.yml" >> "${GITHUB_ENV}"
+          ./redelkctl --config "${RUNNER_TEMP}/redelk-e2e/redelk.yml" validate
+
+      # As root, exactly like a real install: the two ownership regressions the suite guards
+      # against (Logstash's private key, the daemon's config.json) only appear when the installer
+      # runs as a user whose uid is not the one the containers run as.
+      # `env PATH=...` and an explicit interpreter because sudo resets PATH to secure_path:
+      # without it redelkctl runs under /usr/bin/python3, does not find the dependencies that were
+      # installed above, and bootstraps a second virtualenv for itself.
+      - name: Install RedELK
+        run: |
+          sudo -E env "PATH=${PATH}" "$(which python)" ./redelkctl \
+            --config "${E2E_CONFIG}" install --timeout 1500
+
+      - name: Show the stack
+        run: |
+          sudo -E env "PATH=${PATH}" "$(which python)" ./redelkctl \
+            --config "${E2E_CONFIG}" status
+
+      # REDELK_E2E_ENDPOINT makes the fixtures use the deployment that was just installed instead
+      # of installing a second one - which would generate a second set of secrets that the running
+      # Elasticsearch, whose password was fixed when its data volume was created, would reject.
+      #
+      # Also as root: redelk.secrets.yml is 0600 and owned by whoever installed, and the
+      # fixtures read the Elasticsearch credentials out of it.
+      - name: Run the e2e tier
+        env:
+          REDELK_E2E_ENDPOINT: 127.0.0.1
+          REDELK_E2E_TIMEOUT: "1500"
+        run: |
+          sudo -E env "PATH=${PATH}" "REDELK_E2E_CONFIG=${E2E_CONFIG}" \
+            "$(which python)" -m pytest tests/e2e -m e2e -ra
+
+      # if: always() - a failing test is exactly when the logs are wanted, and the step that
+      # produced the failure has already stopped the job by this point.
+      #
+      # Container logs only. elkserver/.env, redelk.secrets.yml and the generated certificates
+      # hold the deployment's credentials and key material, and must never leave the runner.
+      - name: Collect the container logs
+        if: always()
+        run: |
+          mkdir -p "${RUNNER_TEMP}/e2e-logs"
+          sudo docker ps -a > "${RUNNER_TEMP}/e2e-logs/docker-ps.txt" 2>&1 || true
+          for container in $(sudo docker ps -a --format '{{.Names}}' | grep '^redelk-' || true); do
+            sudo docker logs --timestamps "${container}" \
+              > "${RUNNER_TEMP}/e2e-logs/${container}.log" 2>&1 || true
+          done
+          # The daemon and the modules log inside redelk-base, not to its stdout.
+          sudo docker exec redelk-base sh -c 'tail -n 2000 /var/log/redelk/*.log' \
+            > "${RUNNER_TEMP}/e2e-logs/redelk-daemon.log" 2>&1 || true
+          sudo chown -R "$(id -u):$(id -g)" "${RUNNER_TEMP}/e2e-logs"
+          ls -la "${RUNNER_TEMP}/e2e-logs"
+
+      - name: Upload the container logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-container-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-logs
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,151 @@
+---
+# What this scenario is still for, now that redelkctl owns the generation.
+#
+# Everything about *what* redelkctl produces - the rendered filebeat configuration, the package
+# contents, the daemon config, the certificates - is covered by the Python suite (tests/) and, end
+# to end against a real stack, by tests/e2e. Repeating those assertions here only bought a second
+# place to update whenever an output string changed, and coupled CI to the CLI's console format.
+#
+# What Ansible uniquely does is *deliver*: the right package to the right host, over the network,
+# with the permissions intact. That is all this verifies now.
+- name: Verify the RedELK server
+  hosts: elkservers
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Stat what the server needs
+      ansible.builtin.stat:
+        path: "{{ redelk_remote_base_path }}/{{ item }}"
+      register: redelk_verify_server
+      loop:
+        - redelkctl
+        - redelk.yml
+        - redelk.secrets.yml
+        - elkserver/docker-compose.yml
+        # The CA is generated on the control node. If the server ever generated its own, the
+        # shippers' certificates would not be trusted by Logstash.
+        - elkserver/mounts/certs/ca/ca.crt
+        # Seeded by the second synchronisation pass, which is the one that must not overwrite.
+        - elkserver/mounts/redelk-config/etc/redelk/iplist_redteam.conf
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert the server received the repository
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "{{ redelk_remote_base_path }}/{{ item.item }} is missing"
+        quiet: true
+      loop: "{{ redelk_verify_server.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Assert the generated secrets kept their permissions
+      vars:
+        redelk_verify_secrets: >-
+          {{ redelk_verify_server.results
+             | selectattr('item', 'equalto', 'redelk.secrets.yml') | first }}
+      ansible.builtin.assert:
+        that:
+          - redelk_verify_secrets.stat.mode == '0600'
+        fail_msg: >-
+          redelk.secrets.yml is mode {{ redelk_verify_secrets.stat.mode }} on the server,
+          expected 0600
+        quiet: true
+
+    # That the repository arrived complete and runnable. The exit code is the assertion - what
+    # validate *prints* is the CLI's business and is asserted in tests/test_cli.py, not here.
+    - name: Assert redelkctl runs on the server and accepts the deployed configuration
+      ansible.builtin.command:
+        argv:
+          - ./redelkctl
+          - --config
+          - redelk.yml
+          - validate
+        chdir: "{{ redelk_remote_base_path }}"
+      changed_when: false
+
+- name: Verify the C2 server
+  hosts: c2servers
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Stat what the installer should have written
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: redelk_verify_c2
+      loop:
+        - /etc/filebeat/filebeat.yml
+        - /etc/filebeat/inputs.d/sliver.yml
+        - /etc/filebeat/certs/client.crt
+        - /etc/filebeat/certs/client.key
+        - /etc/rush.rc
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert the C2 server is configured
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "{{ item.item }} is missing"
+        quiet: true
+      loop: "{{ redelk_verify_c2.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Assert the client key is not readable by anyone else
+      vars:
+        redelk_verify_key: >-
+          {{ redelk_verify_c2.results
+             | selectattr('item', 'equalto', '/etc/filebeat/certs/client.key') | first }}
+      ansible.builtin.assert:
+        that:
+          - redelk_verify_key.stat.mode == '0600'
+        quiet: true
+
+- name: Verify the redirector
+  hosts: redirs
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Stat what the installer should have written
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: redelk_verify_redir
+      loop:
+        - /etc/filebeat/filebeat.yml
+        - /etc/filebeat/inputs.d/haproxy.yml
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert the redirector is configured
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "{{ item.item }} is missing"
+        quiet: true
+      loop: "{{ redelk_verify_redir.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Check for C2 artefacts that do not belong on a redirector
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: redelk_verify_redir_extra
+      loop:
+        - /etc/filebeat/inputs.d/sliver.yml
+        - /etc/rush.rc
+      loop_control:
+        label: "{{ item }}"
+
+    # The one thing only a multi-host run can catch: the old installers copied every C2's inputs
+    # onto every host. Each host must get its own package and nothing else.
+    - name: Assert the redirector only got redirector configuration
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists
+        fail_msg: "{{ item.item }} should not exist on a redirector"
+        quiet: true
+      loop: "{{ redelk_verify_redir_extra.results }}"
+      loop_control:
+        label: "{{ item.item }}"

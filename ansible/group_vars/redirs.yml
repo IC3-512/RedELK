@@ -1,0 +1,18 @@
+---
+####################################################################################################
+# Redirectors.
+#
+# Which log files are shipped and under which attack scenario is decided by the matching
+# redirectors entry in ../redelk.yml. Ansible only copies build/packages/<name>/ here and runs the
+# installer that redelkctl put in it.
+####################################################################################################
+
+# The package to install: build/packages/<redelk_package_name>/. The inventory host name is what
+# ties an inventory entry to redelk.yml; override it per host only when they cannot be the same.
+redelk_package_name: "{{ inventory_hostname }}"
+
+# Extra flags for the generated installer, for example:
+#   ["--dry-run"]       show what it would change
+#   ["--no-filebeat"]   write the configuration but do not install or start filebeat
+#   ["--uninstall"]     remove what a previous run installed
+redelk_client_install_args: []

@@ -1,4 +1,12 @@
-# Field names, types and description
+# Field names, types and description - HISTORICAL
+
+> **This document is history, not reference.** It is the rename table from the RedELK v1 field
+> names to the v2 ones, written when that migration happened (2019, RedELK v1 to v2). Both the
+> "Field name" and the "New field name" columns are out of date: v3 renamed, added and removed
+> fields again, and several of the "new" names here no longer exist.
+>
+> For what RedELK indexes today, see **[RedELKFieldnamesV2.md](RedELKFieldnamesV2.md)**. It is kept
+> only to make sense of dashboards, saved searches or notes from a v1-era engagement.
 
 ## Index redirtraffic-\*
 
