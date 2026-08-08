@@ -1,0 +1,317 @@
+#
+# Part of RedELK
+#
+# The RedELK stack. There is exactly one compose file: what used to be redelk-full.yml,
+# redelk-limited.yml and redelk-dev.yml (three files that drifted apart) is now one file whose
+# optional services are gated behind the "full" compose profile, and whose every setting comes
+# from the .env that redelkctl generates from redelk.yml.
+#
+# Do not edit .env by hand - change redelk.yml and run ./redelkctl generate.
+#
+# Authors:
+# - Outflank B.V. / Marc Smeets
+# - Lorenzo Bernardi (@fastlorenzo)
+# - RedELK contributors
+#
+
+networks:
+  net:
+    driver: bridge
+
+volumes:
+  es_data:
+  kibana_data:
+  bloodhound_data:
+  postgres_data:
+  redelk_state:
+
+x-logging: &logging
+  driver: "json-file"
+  options:
+    max-size: "${LOG_MAX_SIZE:-200m}"
+    max-file: "${LOG_MAX_FILE:-1}"
+
+services:
+  elasticsearch:
+    container_name: redelk-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
+    networks: [net]
+    ports:
+      - "${BIND_ELASTICSEARCH:-127.0.0.1}:9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+      - ./mounts/certs:${CERTS_DIR_ES}:ro
+    environment:
+      - discovery.type=single-node
+      - cluster.name=redelk-cluster
+      - node.name=redelk-node1
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms${ES_HEAP} -Xmx${ES_HEAP}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - xpack.license.self_generated.type=basic
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=${CERTS_DIR_ES}/redelk-elasticsearch/redelk-elasticsearch.key
+      - xpack.security.http.ssl.certificate=${CERTS_DIR_ES}/redelk-elasticsearch/redelk-elasticsearch.crt
+      - xpack.security.http.ssl.certificate_authorities=${CERTS_DIR_ES}/ca/ca.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.key=${CERTS_DIR_ES}/redelk-elasticsearch/redelk-elasticsearch.key
+      - xpack.security.transport.ssl.certificate=${CERTS_DIR_ES}/redelk-elasticsearch/redelk-elasticsearch.crt
+      - xpack.security.transport.ssl.certificate_authorities=${CERTS_DIR_ES}/ca/ca.crt
+      # A single-node RedELK has nowhere to put a replica, and an unassigned replica is what
+      # keeps every index permanently yellow.
+      - action.auto_create_index=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -sf --cacert ${CERTS_DIR_ES}/ca/ca.crt
+          -u elastic:${ELASTIC_PASSWORD}
+          https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s
+          >/dev/null
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    restart: always
+    logging: *logging
+
+  logstash:
+    container_name: redelk-logstash
+    image: docker.elastic.co/logstash/logstash:${ELASTIC_VERSION}
+    networks: [net]
+    ports:
+      - "${INGEST_PORT:-5044}:5044"
+    volumes:
+      # Two sets of certificates:
+      #  1) CERTS_DIR_REDELK - the RedELK CA and the beats server certificate, presented to (and
+      #     used to verify) the filebeat shippers on redirectors and C2 servers.
+      - ./mounts/logstash-config/certs_inputs:${CERTS_DIR_REDELK}:ro
+      #  2) CERTS_DIR_LOGSTASH - the internal cluster certificates, for talking to Elasticsearch.
+      - ./mounts/certs:${CERTS_DIR_LOGSTASH}:ro
+      - ./mounts/redelk-logs:/var/log/redelk
+      - ./mounts/logstash-config/config/pipelines.yml:/usr/share/logstash/config/pipelines.yml:ro
+      # The filters are a bind mount so you can add your own C2 without rebuilding an image.
+      - ./mounts/logstash-config/redelk-main:/usr/share/logstash/redelk-main
+    environment:
+      - node.name=redelk-logstash
+      - LS_JAVA_OPTS=-Xms1g -Xmx1g
+      - CONFIG_RELOAD_AUTOMATIC=true
+      - CERTS_DIR_REDELK=${CERTS_DIR_REDELK}
+      - CERTS_DIR_LOGSTASH=${CERTS_DIR_LOGSTASH}
+      - CERTS_LOGSTASH_INPUT_KEY=${CERTS_LOGSTASH_INPUT_KEY}
+      - CERTS_LOGSTASH_INPUT_CRT=${CERTS_LOGSTASH_INPUT_CRT}
+      - CERTS_LOGSTASH_INPUT_CA=${CERTS_LOGSTASH_INPUT_CA}
+      - CERTS_LOGSTASH_OUTPUT_CA=${CERTS_LOGSTASH_OUTPUT_CA}
+      - LOGSTASH_CLIENT_AUTH=${LOGSTASH_CLIENT_AUTH:-none}
+      - CREDS_redelk_ingest=${CREDS_redelk_ingest}
+      - XPACK_MONITORING_ENABLED=false
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: always
+    logging: *logging
+
+  base:
+    container_name: redelk-base
+    image: ${REDELK_IMAGE_REPO}/redelk-base:${REDELK_IMAGE_TAG}
+    build:
+      context: ./docker/redelk-base
+      dockerfile: Dockerfile
+    networks: [net]
+    volumes:
+      - ./mounts/redelk-config/etc/cron.d:/etc/cron.d:ro
+      - ./mounts/redelk-config/etc/redelk:/etc/redelk
+      - ./mounts/redelk-logs:/var/log/redelk
+      - ./mounts/redelk-ssh:/home/redelk/.ssh
+      - ./mounts/redelk-www/c2logs:/var/www/html/c2logs
+      - ./mounts/certs:/etc/redelk/certs:ro
+      - redelk_state:/var/lib/redelk
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - CREDS_kibana_system=${CREDS_kibana_system}
+      - CREDS_logstash_system=${CREDS_logstash_system}
+      - CREDS_redelk_ingest=${CREDS_redelk_ingest}
+      - CREDS_redelk=${CREDS_redelk}
+      - ES_URL=${ES_URL}
+      - KIBANA_URL=https://redelk-kibana:5601
+      - REDELK_CA=/etc/redelk/certs/ca/ca.crt
+    healthcheck:
+      # Turns healthy once Elasticsearch has been provisioned (users, roles, ILM policy and index
+      # templates). Kibana waits for this, because it cannot authenticate until its own service
+      # account password has been set.
+      test: ["CMD-SHELL", "test -f /var/lib/redelk/es-provisioned"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: always
+    logging: *logging
+
+  kibana:
+    container_name: redelk-kibana
+    image: docker.elastic.co/kibana/kibana:${ELASTIC_VERSION}
+    networks: [net]
+    ports:
+      - "${BIND_KIBANA:-127.0.0.1}:5601:5601"
+    volumes:
+      - kibana_data:/usr/share/kibana/data
+      - ./mounts/certs:${CERTS_DIR_KBN}:ro
+    environment:
+      - SERVER_NAME=redelk-kibana
+      - SERVER_PUBLICBASEURL=https://${EXTERNAL_DOMAIN}
+      - ELASTICSEARCH_HOSTS=${ES_URL}
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${CREDS_kibana_system}
+      - ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES=${CERTS_DIR_KBN}/ca/ca.crt
+      - SERVER_SSL_ENABLED=true
+      - SERVER_SSL_CERTIFICATE=${CERTS_DIR_KBN}/redelk-kibana/redelk-kibana.crt
+      - SERVER_SSL_KEY=${CERTS_DIR_KBN}/redelk-kibana/redelk-kibana.key
+      - SERVER_SSL_CERTIFICATEAUTHORITIES=${CERTS_DIR_KBN}/ca/ca.crt
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KBN_XPACK_ENCRYPTEDSAVEDOBJECTS}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KBN_XPACK_REPORTING}
+      - XPACK_SECURITY_ENCRYPTIONKEY=${KBN_XPACK_SECURITY}
+      - TELEMETRY_OPTIN=false
+      - TELEMETRY_ENABLED=false
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -sfk https://localhost:5601/api/status | grep -q '"level":"available"'
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      base:
+        condition: service_healthy
+    restart: always
+    logging: *logging
+
+  nginx:
+    container_name: redelk-nginx
+    image: nginx:1.29-alpine
+    networks: [net]
+    volumes:
+      - ./mounts/nginx-config:/etc/nginx/templates:ro
+      - ./mounts/redelk-www:/var/www/html:ro
+      - ${CERTS_DIR_NGINX_LOCAL}:${CERTS_DIR_NGINX}:ro
+      - ${CERTS_DIR_NGINX_CA_LOCAL}:${CERTS_DIR_NGINX_CA}:ro
+      - ./mounts/certbot/www:/var/www/certbot
+    ports:
+      - "${PORT_HTTP:-80}:80"
+      - "${PORT_HTTPS:-443}:443"
+      # The BloodHound port is published by docker-compose.override.yml, which redelkctl writes
+      # only for the full profile - a compose profile can gate a service but not a single port.
+    environment:
+      - TLS_NGINX_CRT_PATH=${TLS_NGINX_CRT_PATH}
+      - TLS_NGINX_KEY_PATH=${TLS_NGINX_KEY_PATH}
+      - TLS_NGINX_CA_PATH=${TLS_NGINX_CA_PATH}
+    depends_on:
+      kibana:
+        condition: service_started
+    restart: always
+    logging: *logging
+
+  certbot:
+    container_name: redelk-certbot
+    image: certbot/certbot:v5.1.0
+    profiles: [letsencrypt]
+    networks: [net]
+    volumes:
+      - ./mounts/certbot/conf:/etc/letsencrypt
+      - ./mounts/certbot/www:/var/www/certbot
+    entrypoint: >-
+      /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot
+      --quiet; sleep 12h & wait $${!}; done"
+    depends_on:
+      nginx:
+        condition: service_started
+    restart: always
+    logging: *logging
+
+  jupyter:
+    container_name: redelk-jupyter
+    image: ${REDELK_IMAGE_REPO}/redelk-jupyter:${REDELK_IMAGE_TAG}
+    build:
+      context: ./docker/redelk-jupyter
+      dockerfile: Dockerfile
+    profiles: [full]
+    networks: [net]
+    expose: ["8888"]
+    volumes:
+      - ./mounts/jupyter-workbooks:/home/jovyan/work
+    restart: always
+    logging: *logging
+
+  bloodhound-postgres:
+    container_name: redelk-bloodhound-postgres
+    image: docker.io/library/postgres:17-alpine
+    profiles: [full]
+    networks: [net]
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DATABASE}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: always
+    logging: *logging
+
+  bloodhound-neo4j:
+    container_name: redelk-bloodhound-neo4j
+    image: docker.io/library/neo4j:5-community
+    profiles: [full]
+    networks: [net]
+    volumes:
+      - bloodhound_data:/data
+    ports:
+      - "${BIND_NEO4J:-127.0.0.1}:7474:7474"
+      - "${BIND_NEO4J:-127.0.0.1}:7687:7687"
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH}
+      # Neo4j 5 renamed every dbms.memory.* setting; the 4.x names are silently ignored.
+      - NEO4J_server_memory_heap_initial__size=${NEO4J_HEAP}
+      - NEO4J_server_memory_heap_max__size=${NEO4J_HEAP}
+      - NEO4J_server_memory_pagecache_size=${NEO4J_HEAP}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: always
+    logging: *logging
+
+  bloodhound:
+    container_name: redelk-bloodhound-app
+    image: docker.io/specterops/bloodhound:${BLOODHOUND_TAG:-latest}
+    profiles: [full]
+    networks: [net]
+    expose: ["8080"]
+    environment:
+      - bhe_disable_cypher_qc=${bhe_disable_cypher_qc:-false}
+    volumes:
+      - ./mounts/bloodhound-config/bloodhound.config.json:/bloodhound.config.json:ro
+    depends_on:
+      bloodhound-postgres:
+        condition: service_healthy
+      bloodhound-neo4j:
+        condition: service_healthy
+    restart: always
+    logging: *logging

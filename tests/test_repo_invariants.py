@@ -411,3 +411,35 @@ def test_event_scoped_dashboards_declare_their_query():
             f"{dashboard_id} must be filtered by {expected!r}, found {actual!r}. Without it every "
             "metric counts the whole rtops-* index. Run tools/fix_dashboard_scoping.py."
         )
+
+
+def test_every_file_the_installer_needs_is_committed():
+    """A gitignored source file works on every developer's machine and on nobody else's.
+
+    elkserver/docker-compose.yml was excluded by a rule left over from v2, where the installer
+    generated it. v3 does not - redelkctl only writes docker-compose.override.yml, and `install`
+    then runs `docker compose -f docker-compose.yml up`. A fresh clone could therefore not install
+    RedELK at all, which every local test missed because they all ran against a working tree that
+    still had the file, and which the nightly end-to-end workflow caught on its first run.
+    """
+    needed = [
+        "redelkctl",
+        "VERSION",
+        "tools/requirements.txt",
+        "elkserver/docker-compose.yml",
+        "elkserver/docker/redelk-base/Dockerfile",
+        "tests/e2e/fixtures/redelk.e2e.yml",
+        "ansible/molecule/redelk/files/redelk.yml",
+    ]
+    tracked = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--", *needed],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+
+    missing = [path for path in needed if path not in tracked]
+    assert not missing, (
+        f"{missing} exist in the working tree but are not committed, so a fresh clone cannot "
+        "install RedELK. Check .gitignore for a rule that matches them."
+    )

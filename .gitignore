@@ -126,7 +126,10 @@ elkserver/mounts/certbot/*
 elkserver/mounts/jupyter-workbooks/redelk_passwords.py
 elkserver/redelk_passwords.cfg
 elkserver/redelk-install.log
-elkserver/docker-compose.yml
+# NOT ignored: elkserver/docker-compose.yml is a source file, not a generated one.
+# redelkctl only generates docker-compose.override.yml; `install` then runs
+# `docker compose -f docker-compose.yml up`, so a clone without it cannot install at all.
+# The v2 installer generated this file, which is why it was listed here.
 redelk-inintialsetup.log
 redirs.tgz
 redirs/VERSION
