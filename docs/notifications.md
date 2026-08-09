@@ -239,9 +239,14 @@ notifications:
   apprise:
     enabled: true
     urls:
-      - "ntfy://ntfy.example.com/redelk"
+      - "ntfys://ntfy.example.com/redelk"
       - "matrixs://redelk:password@matrix.example.com/#ops:example.com"
 ```
+
+**Mind the scheme.** `ntfys://` is HTTPS; plain `ntfy://` talks to port 80 and a TLS-only instance
+refuses it. Apprise accepts the URL either way - it only fails at delivery time, and the connector
+then reports the alarm as undelivered. The same distinction applies to `matrix://` vs `matrixs://`.
+`./redelkctl notify test --channel apprise` is the cheapest way to find out which you have.
 
 This sits beside the Slack, Teams and e-mail connectors rather than replacing them: those three
 render the alarm natively - Block Kit, an adaptive card, an HTML table - and Apprise carries a

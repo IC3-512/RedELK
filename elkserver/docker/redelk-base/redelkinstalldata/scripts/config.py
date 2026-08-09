@@ -69,6 +69,8 @@ DEFAULTS: dict[str, Any] = {
         "alarm_useragent": {"enabled": False, "interval": 320},
         "alarm_backendalarm": {"enabled": False, "interval": 320},
         "alarm_dummy": {"enabled": False, "interval": 300},
+        "alarm_newimplant": {"enabled": False, "interval": 60},
+        "alarm_newcredentials": {"enabled": False, "interval": 60},
         "alarm_manual": {"enabled": False, "interval": 300},
     },
     "enrich": {

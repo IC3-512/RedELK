@@ -188,6 +188,33 @@ next one.
 A cron job (`run_torexitnodeupdate.sh`, hourly) additionally maintains
 `/etc/redelk/torexitnodes.conf`.
 
+### `alarm_newimplant`
+
+**What it does.** Alarms the first time an implant checks in - the `implant_newimplant` document
+the API connectors write on the first callback, and the Logstash C2 filters write from a
+`[metadata]` line.
+
+**Needs.** Nothing. No API key, no external service.
+
+**Config.** `newimplant: { enabled: false, interval: 60 }`. Off by default: on a busy engagement
+it is chatty, and whether that is signal or noise depends on the operation.
+
+**Grouped by** `implant.id`, so one callback is one notification however many documents it wrote.
+
+### `alarm_newcredentials`
+
+**What it does.** Alarms when a credential lands in `credentials-*`.
+
+**It never reports the secret.** The notification carries the account, realm, source and host -
+enough to know what was collected and go and look - but never `creds.credential`. A notification is
+the least controlled thing RedELK produces: it ends up in a chat channel, a phone's notification
+shade and a webhook's logs. If you genuinely want the value in the message, add `creds.credential`
+to the module's `ret["fields"]` and understand what you are choosing.
+
+**Config.** `newcredentials: { enabled: false, interval: 60 }`.
+
+**Grouped by** `creds.realm`.
+
 ### `enrich_greynoise`
 
 **What it does.** Asks GreyNoise's community API whether a source IP is known internet background

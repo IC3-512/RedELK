@@ -14,6 +14,7 @@ Authors:
 from __future__ import annotations
 
 import importlib
+import json
 
 import pytest
 
@@ -594,3 +595,63 @@ def test_filehash_still_marks_a_clean_hash_when_another_provider_failed(daemon_e
     instance.build_report({"aaa": [ioc]}, {}, check_results)
 
     assert marked == ["doc1"]
+
+
+# ------------------------------------------------------------------------------------------------
+# alarm_newimplant / alarm_newcredentials
+# ------------------------------------------------------------------------------------------------
+
+
+def test_newimplant_queries_rtops_for_first_checkins(daemon_env):
+    env = daemon_env({"alarms": {"alarm_newimplant": {"enabled": True}}})
+    module = load(env, "alarm_newimplant")
+
+    env.es.queue_hits([hit("a", {"implant": {"id": "3"}, "host": {"name": "WS-1"}})])
+    result = module.Module().run()
+
+    assert result["hits"]["total"] == 1
+    assert result["groupby"] == ["implant.id"]
+    search = env.es.searches[0]
+    assert "implant_newimplant" in json.dumps(search)
+    # Without the tag exclusion the same check-in alarms on every single run, forever.
+    assert "alarm_newimplant" in json.dumps(search)
+    assert search["index"] == "rtops-*"
+
+
+def test_newcredentials_queries_the_credentials_index(daemon_env):
+    """credentials-*, not rtops-*.
+
+    Both the API connectors and the logstash filters write credentials into their own index, so a
+    query against rtops-* would be permanently empty and the alarm would look healthy while never
+    firing.
+    """
+    env = daemon_env({"alarms": {"alarm_newcredentials": {"enabled": True}}})
+    module = load(env, "alarm_newcredentials")
+
+    env.es.queue_hits([hit("a", {"creds": {"username": "svc_backup", "realm": "CONTOSO"}})])
+    result = module.Module().run()
+
+    assert result["hits"]["total"] == 1
+    assert env.es.searches[0]["index"] == "credentials-*"
+    assert "alarm_newcredentials" in json.dumps(env.es.searches[0])
+
+
+def test_newcredentials_never_reports_the_secret_itself(daemon_env):
+    """The notification says a credential was collected, not what it is.
+
+    ret["fields"] is what every connector renders. A harvested password in a chat message, a phone
+    notification or a webhook's logs reaches a wider audience than the operation agreed to - and on
+    a deployment whose ntfy instance is readable by anything on its tailnet, that is not
+    theoretical.
+    """
+    env = daemon_env({"alarms": {"alarm_newcredentials": {"enabled": True}}})
+    module = load(env, "alarm_newcredentials")
+
+    env.es.queue_hits(
+        [hit("a", {"creds": {"username": "svc_backup", "credential": "Summer2026!"}})]
+    )
+    fields = module.Module().run()["fields"]
+
+    assert "creds.username" in fields
+    assert "creds.realm" in fields
+    assert "creds.credential" not in fields, "the secret must never be a reported field"

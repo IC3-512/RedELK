@@ -551,6 +551,8 @@ def as_daemon_config(config: Config) -> dict[str, Any]:
             "alarm_httptraffic": alarm("httptraffic"),
             "alarm_useragent": alarm("useragent"),
             "alarm_backendalarm": alarm("backendalarm"),
+            "alarm_newimplant": alarm("newimplant"),
+            "alarm_newcredentials": alarm("newcredentials"),
             "alarm_manual": alarm("manual"),
             "alarm_dummy": alarm("dummy"),
         },

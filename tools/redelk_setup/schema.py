@@ -77,6 +77,8 @@ NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$")
 # (alarms -> alarm_<key>, enrich -> enrich_<key>).
 ALARM_MODULES = (
     "filehash",
+    "newimplant",
+    "newcredentials",
     "httptraffic",
     "useragent",
     "backendalarm",
@@ -161,7 +163,8 @@ DEFAULTS: dict[str, Any] = {
         # on-call escalation belong if you already run one - RedELK does not reimplement them.
         "alertmanager": {"enabled": False, "url": "", "labels": {}},
         # One library, a hundred-odd services. Each entry is an Apprise URL, e.g.
-        # ntfy://host/topic, matrixs://user:pass@host/#room, gotify://host/token, tgram://...
+        # ntfys://host/topic (ntfys is HTTPS - plain ntfy:// is port 80 and will be refused
+        # by a TLS-only instance), matrixs://user:pass@host/#room, gotify://host/token, ...
         "apprise": {"enabled": False, "urls": []},
     },
     "api_keys": {
@@ -186,6 +189,11 @@ DEFAULTS: dict[str, Any] = {
             },
             "useragent": {"enabled": True, "interval": 320},
             "backendalarm": {"enabled": True, "interval": 320},
+            # Your own operation rather than the blue team: the first check-in of an implant and
+            # anything the operation collects. Off by default - on a busy engagement they are
+            # chatty, and whether that is signal or noise depends on the operation.
+            "newimplant": {"enabled": False, "interval": 60},
+            "newcredentials": {"enabled": False, "interval": 60},
             "manual": {"enabled": False, "interval": 300},
             "dummy": {"enabled": False, "interval": 300},
         },

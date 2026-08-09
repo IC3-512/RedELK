@@ -257,7 +257,7 @@ notifications:
   apprise:
     enabled: false
     urls: []
-      # - "ntfy://ntfy.example.com/redelk"
+      # - "ntfys://ntfy.example.com/redelk"     # ntfys = HTTPS; plain ntfy:// is port 80
       # - "matrixs://redelk:password@matrix.example.com/#ops:example.com"
 
 ####################################################################################################
@@ -287,6 +287,10 @@ modules:
     httptraffic: { enabled: true, interval: 310, notify_interval: 86400, backend_filter: "c2*" }
     useragent: { enabled: true, interval: 320 }
     backendalarm: { enabled: true, interval: 320 }
+    # Your own operation rather than the blue team. Pair them with a notification connector -
+    # notifications.apprise reaches ntfy, Matrix, Gotify, Signal and the rest from one URL.
+    newimplant: { enabled: false, interval: 60 }
+    newcredentials: { enabled: false, interval: 60 }
     manual: { enabled: false, interval: 300 }
     dummy: { enabled: false, interval: 300 }
 

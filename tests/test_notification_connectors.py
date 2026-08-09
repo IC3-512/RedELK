@@ -168,7 +168,7 @@ def install_fake_apprise(monkeypatch, add_result=True, notify_result=True):
 def test_apprise_notifies_every_configured_url(daemon_env, monkeypatch):
     env = connector_env(
         daemon_env,
-        {"apprise": {"enabled": True, "urls": ["ntfy://host/redelk", "gotify://host/token"]}},
+        {"apprise": {"enabled": True, "urls": ["ntfys://host/redelk", "gotify://host/token"]}},
     )
     module = load(env, "apprise")
     install_fake_apprise(monkeypatch)
@@ -176,7 +176,7 @@ def test_apprise_notifies_every_configured_url(daemon_env, monkeypatch):
     module.Module().send_alarm(ALARM)
 
     instance = FakeApprise.instances[-1]
-    assert instance.added == ["ntfy://host/redelk", "gotify://host/token"]
+    assert instance.added == ["ntfys://host/redelk", "gotify://host/token"]
     title, body = instance.notified[0]
     assert "op-chimera" in title
     assert "198.51.100.5" in body
@@ -184,7 +184,7 @@ def test_apprise_notifies_every_configured_url(daemon_env, monkeypatch):
 
 def test_apprise_raises_when_a_target_fails(daemon_env, monkeypatch):
     """daemon.py marks documents as alarmed only when a connector returns without raising."""
-    env = connector_env(daemon_env, {"apprise": {"enabled": True, "urls": ["ntfy://host/redelk"]}})
+    env = connector_env(daemon_env, {"apprise": {"enabled": True, "urls": ["ntfys://host/redelk"]}})
     module = load(env, "apprise")
     install_fake_apprise(monkeypatch, notify_result=False)
 
