@@ -410,6 +410,16 @@ def test_the_nginx_configuration_renders_without_placeholders(generated, elkserv
     assert "${TLS_NGINX_CRT_PATH}" in content
 
 
+def test_the_apprise_priority_map_reaches_the_daemon(generated, elkserver, result, daemon_env):
+    """It is read from config.json, so a mapping that stops here is a setting that does nothing."""
+    cfg = generated()
+    cfg.raw["notifications"]["apprise"]["priority"] = {"alarm_httptraffic": "warning"}
+
+    document = config_module.as_daemon_config(cfg)
+
+    assert document["notifications"]["apprise"]["priority"] == {"alarm_httptraffic": "warning"}
+
+
 # ------------------------------------------------------------------------------------------------
 # server.es_proxy
 #

@@ -553,6 +553,9 @@ def as_daemon_config(config: Config) -> dict[str, Any]:
             "apprise": {
                 "enabled": notifications["apprise"]["enabled"],
                 "urls": list(notifications["apprise"]["urls"] or []),
+                # Without this the per-alarm urgency validates, documents and then does nothing,
+                # because the connector reads it from config.json.
+                "priority": dict(notifications["apprise"].get("priority") or {}),
             },
         },
         # Derived from the registries rather than listed again. Adding a module used to mean
