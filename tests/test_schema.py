@@ -469,3 +469,51 @@ def test_the_minimal_fixture_only_disables_what_it_has_to():
     """Guard against the fixture drifting into "disable everything until it validates"."""
     assert set(MINIMAL_CONFIG["modules"]["alarms"]) == {"filehash"}
     assert set(MINIMAL_CONFIG["modules"]["enrich"]) == {"greynoise", "domainscategorization"}
+
+
+# ------------------------------------------------------------------------------------------------
+# Free-form mappings
+#
+# Most of DEFAULTS is a closed vocabulary and an unknown key is a typo worth reporting. Two entries
+# are the opposite - the keys are the operator's to choose - and recursing into those reported
+# every entry as unknown, so setting one Alertmanager label made the whole config invalid.
+# ------------------------------------------------------------------------------------------------
+
+
+def test_alertmanager_labels_are_the_operators_to_choose():
+    errors = []
+    merged = schema.merge_defaults(
+        {"enabled": False, "url": "", "labels": {}},
+        {"enabled": True, "url": "http://am:9093", "labels": {"team": "red", "severity": "high"}},
+        "notifications.alertmanager",
+        errors,
+    )
+
+    assert errors == []
+    assert merged["labels"] == {"team": "red", "severity": "high"}
+
+
+def test_the_apprise_priority_map_is_free_form():
+    errors = []
+    merged = schema.merge_defaults(
+        {"enabled": False, "urls": [], "priority": {}},
+        {"enabled": True, "urls": ["ntfys://h/t"], "priority": {"alarm_newimplant": "failure"}},
+        "notifications.apprise",
+        errors,
+    )
+
+    assert errors == []
+    assert merged["priority"] == {"alarm_newimplant": "failure"}
+
+
+def test_a_typo_in_a_closed_mapping_is_still_reported():
+    """The free-form exemption must not turn every typo into a silent no-op."""
+    errors = []
+    schema.merge_defaults(
+        {"enabled": False, "url": ""},
+        {"enabled": True, "urls": "typo"},
+        "notifications.alertmanager",
+        errors,
+    )
+
+    assert any("urls: unknown configuration key" in e for e in errors)

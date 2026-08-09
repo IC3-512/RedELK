@@ -269,6 +269,11 @@ def merge_defaults(defaults: Any, value: Any, path: str, errors: list[str]) -> A
     Unknown keys are reported as errors rather than silently ignored: a typo in a config key
     that silently does nothing is one of the most expensive failure modes of a config-driven
     installer.
+
+    An empty mapping in DEFAULTS means the opposite - the keys are the operator's to choose
+    (notifications.alertmanager.labels, notifications.apprise.priority). Recursing into those
+    reported every entry as an unknown key, so setting a single Alertmanager label made the whole
+    configuration invalid.
     """
     if isinstance(defaults, dict):
         # Deep copies, not dict(): a shallow copy would let a caller mutating a nested value in
@@ -278,6 +283,8 @@ def merge_defaults(defaults: Any, value: Any, path: str, errors: list[str]) -> A
         if not isinstance(value, dict):
             errors.append(f"{path}: expected a mapping, got {_typename(value)}")
             return copy.deepcopy(defaults)
+        if not defaults:
+            return copy.deepcopy(value)
         merged = {}
         for key, default in defaults.items():
             sub_path = f"{path}.{key}" if path else key
