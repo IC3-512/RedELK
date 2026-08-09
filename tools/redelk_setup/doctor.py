@@ -284,7 +284,15 @@ def _check_ports(cfg: config_module.Config, report: Report) -> None:
 def wait_for_stack(cfg: config_module.Config, *, timeout: int = 600) -> bool:
     """Poll until Elasticsearch and Kibana are usable, printing progress."""
     deadline = time.time() + timeout
-    stages = [("Elasticsearch", _es_ready), ("Kibana", _kibana_ready)]
+    stages = [
+        ("Elasticsearch", _es_ready),
+        ("Kibana", _kibana_ready),
+        # Kibana answering is not the same as RedELK being usable. redelk-base imports the data
+        # views, searches and dashboards after Kibana comes up, and until that finishes an
+        # operator who opens the UI - or a test that queries it - sees an empty Kibana. Waiting
+        # for the dashboards is the only honest definition of "ready".
+        ("RedELK dashboards", _dashboards_ready),
+    ]
 
     for label, probe in stages:
         print(f"  waiting for {label} ", end="", flush=True)
@@ -310,6 +318,31 @@ def _es_ready(cfg: config_module.Config) -> tuple[bool, str]:
     if status != 200 or not isinstance(body, dict):
         return False, ""
     return body.get("status") in ("green", "yellow"), f"cluster {body.get('status')}"
+
+
+def _dashboards_ready(cfg: config_module.Config) -> tuple[bool, str]:
+    """Have the saved objects been imported yet?
+
+    Provisioning runs inside redelk-base and finishes seconds to minutes after Kibana reports
+    itself available, so this is the last thing to become true.
+    """
+    try:
+        status, body = _request(
+            "https://127.0.0.1:5601/api/saved_objects/_find?type=dashboard&per_page=1",
+            verify=False,
+            auth=("elastic", cfg.secrets.get("elastic_password", "")),
+            timeout=10,
+            headers={"kbn-xsrf": "true", "x-elastic-internal-origin": "Kibana"},
+        )
+    except (urllib.error.URLError, ConnectionError, socket.timeout, ssl.SSLError, OSError):
+        return False, ""
+    if status != 200:
+        return False, ""
+    try:
+        total = int(json.loads(body).get("total", 0))
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return False, ""
+    return total > 0, f"{total} imported"
 
 
 def _kibana_ready(cfg: config_module.Config) -> tuple[bool, str]:

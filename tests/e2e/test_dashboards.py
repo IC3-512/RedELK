@@ -46,6 +46,7 @@ import pytest
 
 # Relative: tests/e2e is a package (see its __init__.py), so pytest imports this module as
 # e2e.test_dashboards and the expectations are a sibling of it, not a top-level module.
+from .conftest import wait_until
 from .expected_panels import COUNT, DASHBOARDS, KNOWN_EMPTY, SCOPE, known_empty_reason
 
 TEMPLATES = (
@@ -310,6 +311,17 @@ def deployed_dashboards(kibana) -> dict[str, dict]:
     and the scope query all live in attributes, and a filtered response would hand these tests a
     dashboard missing exactly the parts they exist to check.
     """
+    # Wait rather than snapshot. redelk-base imports the saved objects seconds AFTER Kibana
+    # reports itself available, and `redelkctl install` used to return in that window - so the
+    # first test could query an empty Kibana and report all nine dashboards missing, which is
+    # exactly what the nightly did on 2026-08-09: pytest started 3.8s before the import finished.
+    # The install now waits too; this keeps the tier honest against a deployment someone else
+    # installed, and turns a real regression into a 120s wait instead of a false failure.
+    wait_until(
+        lambda: len(kibana.saved_objects("dashboard")),
+        timeout=120,
+        message="dashboards to appear in Kibana (redelk-base imports them after Kibana starts)",
+    )
     return {obj["id"]: obj for obj in kibana.saved_objects("dashboard")}
 
 
