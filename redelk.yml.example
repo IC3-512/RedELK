@@ -51,6 +51,16 @@ server:
   # limited = Elastic stack only. Needs >= 4GB RAM.
   profile: full
 
+  # Expose Elasticsearch through nginx at https://<server>/es, for the things that need to query it
+  # directly - a notebook, a reporting script, an operator with curl - without opening 9200 to the
+  # network or distributing the cluster certificate.
+  #
+  # Off by default. Past nginx's basic auth this is a working Elasticsearch API rather than a
+  # read-only view, so turning it on makes your htpasswd credentials cluster credentials. It
+  # authenticates to Elasticsearch as the `redelk` user, not `elastic`, so it is not a superuser
+  # handle.
+  es_proxy: false
+
   # Where redirectors and C2 servers ship their logs to. This is the address they connect to, which
   # may differ from server.hostnames[0] if you are behind NAT. Leave empty to use hostnames[0].
   ingest_host: ""

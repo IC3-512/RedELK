@@ -112,6 +112,10 @@ DEFAULTS: dict[str, Any] = {
         "hostnames": [],
         "ips": [],
         "profile": "full",
+        # Expose Elasticsearch through nginx at /es. Off by default: past nginx's basic auth this
+        # is a working Elasticsearch API, so it makes the htpasswd credentials cluster
+        # credentials. It authenticates as the `redelk` user, not `elastic`.
+        "es_proxy": False,
         "ingest_host": "",
         "ingest_port": 5044,
         "memory": {

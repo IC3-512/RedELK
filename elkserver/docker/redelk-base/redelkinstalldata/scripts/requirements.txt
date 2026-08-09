@@ -1,14 +1,19 @@
-apprise>=1.9,<2
-beautifulsoup4>=4.12,<5
-elasticsearch>=9.0,<10
-json2html>=1.3,<2
 # Runtime dependencies of the RedELK base container.
 #
+# Kept alphabetical, and kept to what is actually imported: every entry here is installed into an
+# image that runs on the log server of a live operation, so an unused dependency is supply-chain
+# surface bought for nothing.
+#
 # Removed in v3:
-#   bs4==0.0.1      - a dummy sdist that is not BeautifulSoup; the real package is below
+#   bs4==0.0.1      - a dummy sdist that is not BeautifulSoup; nothing imports either
 #   pymsteams       - only speaks the Office 365 connector protocol, which Microsoft retired
+#   beautifulsoup4  - no module imports it
+#   json2html       - no module imports it; the email connector builds its own table
+#   slack_sdk       - modules/slack/module.py posts to the incoming webhook with requests, which
+#                     it documents: a webhook is a plain JSON POST and needs no SDK
+apprise>=1.9,<2
+elasticsearch>=9.0,<10
 Pillow>=11.0,<13
 python-dateutil>=2.9,<3
 requests>=2.32,<3
-slack_sdk>=3.27,<4
 urllib3>=2.2,<3

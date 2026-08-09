@@ -443,3 +443,84 @@ def test_every_file_the_installer_needs_is_committed():
         f"{missing} exist in the working tree but are not committed, so a fresh clone cannot "
         "install RedELK. Check .gitignore for a rule that matches them."
     )
+
+
+# ------------------------------------------------------------------------------------------------
+# The provisioning marker
+#
+# bootstrap.py writes /var/lib/redelk/es-provisioned when Elasticsearch and Kibana are ready, and
+# three other files test for that exact path: the image healthcheck, the compose healthcheck and
+# the installation docs. Nothing links them, so renaming it in one place does not fail anywhere -
+# it makes redelk-base permanently unhealthy, and Kibana waits on that healthcheck forever.
+# ------------------------------------------------------------------------------------------------
+
+MARKER_SITES = {
+    "elkserver/docker/redelk-base/redelkinstalldata/scripts/bootstrap.py": 'STATE_DIR / "es-provisioned"',
+    "elkserver/docker/redelk-base/Dockerfile": "test -f /var/lib/redelk/es-provisioned",
+    "elkserver/docker-compose.yml": "test -f /var/lib/redelk/es-provisioned",
+    "docs/installation.md": "/var/lib/redelk/es-provisioned",
+}
+
+
+@pytest.mark.parametrize("relative,expected", sorted(MARKER_SITES.items()))
+def test_the_provisioning_marker_path_agrees_everywhere(relative, expected):
+    path = REPO_ROOT / relative
+    assert path.is_file(), f"{relative} moved; the marker invariant no longer covers it"
+    assert expected in path.read_text(encoding="utf-8"), (
+        f"{relative} no longer refers to the provisioning marker as {expected!r}. "
+        "All four sites must agree or redelk-base never reports healthy."
+    )
+
+
+def test_the_state_directory_is_the_one_the_container_creates():
+    """bootstrap.py's STATE_DIR has to be a directory the Dockerfile actually makes."""
+    bootstrap = (
+        REPO_ROOT / "elkserver/docker/redelk-base/redelkinstalldata/scripts/bootstrap.py"
+    ).read_text(encoding="utf-8")
+    dockerfile = (REPO_ROOT / "elkserver/docker/redelk-base/Dockerfile").read_text(encoding="utf-8")
+
+    assert 'STATE_DIR = Path("/var/lib/redelk")' in bootstrap
+    assert "/var/lib/redelk" in dockerfile
+
+
+# ------------------------------------------------------------------------------------------------
+# The module registries
+#
+# schema.ALARM_MODULES / ENRICH_MODULES drive the redelk.yml defaults, validation and the alarms
+# and enrich blocks of the generated config.json. The daemon, separately, finds modules by listing
+# directories. So a module directory that nobody registered loads fine and then does nothing,
+# because module_should_run() finds no configuration for it and skips it - silently, every tick.
+# ------------------------------------------------------------------------------------------------
+
+MODULES_DIR = DAEMON_SCRIPTS_DIR / "modules"
+
+
+def module_directories(prefix: str) -> set[str]:
+    return {
+        entry.name[len(prefix) :]
+        for entry in MODULES_DIR.iterdir()
+        if entry.is_dir() and entry.name.startswith(prefix) and (entry / "module.py").is_file()
+    }
+
+
+@pytest.mark.parametrize(
+    "prefix,registry",
+    [("alarm_", "ALARM_MODULES"), ("enrich_", "ENRICH_MODULES")],
+)
+def test_every_module_on_disk_is_registered(prefix, registry):
+    from redelk_setup import schema
+
+    on_disk = module_directories(prefix)
+    registered = set(getattr(schema, registry))
+
+    unregistered = on_disk - registered
+    assert not unregistered, (
+        f"{sorted(unregistered)} exist as {prefix}* module directories but are missing from "
+        f"schema.{registry}, so they will never be configured and will never run"
+    )
+
+    missing = registered - on_disk
+    assert not missing, (
+        f"schema.{registry} lists {sorted(missing)} but there is no {prefix}<name>/module.py, "
+        "so redelk.yml documents a module that cannot load"
+    )

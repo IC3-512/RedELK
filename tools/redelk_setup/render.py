@@ -19,6 +19,7 @@ Authors:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import dataclass, field
@@ -270,11 +271,20 @@ def render_nginx(cfg: config_module.Config, elkserver: Path, result: RenderResul
     profile; the template now simply branches on the profile.
     """
     env = environment()
+    # Rendered in rather than left to envsubst: nginx's entrypoint substitutes from the container
+    # environment, and putting a cluster credential there would expose it to every `docker inspect`
+    # and every process in the container.
+    es_proxy_auth = ""
+    if cfg.raw["server"].get("es_proxy"):
+        credential = f"redelk:{cfg.secrets['redelk_password']}"
+        es_proxy_auth = base64.b64encode(credential.encode("utf-8")).decode("ascii")
+
     content = env.get_template("nginx/default.conf.j2").render(
         header=GENERATED_HEADER.replace("#", "#", 1),
         config=cfg,
         server=cfg.raw["server"],
         full=cfg.is_full,
+        es_proxy_auth=es_proxy_auth,
     )
     target = elkserver / "mounts" / "nginx-config" / "default.conf.template"
     result.add(target, write_if_changed(target, content))

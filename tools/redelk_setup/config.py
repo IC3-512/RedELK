@@ -501,6 +501,23 @@ def as_daemon_config(config: Config) -> dict[str, Any]:
         for c2 in config.c2_by_ingest("api")
     ]
 
+    # The only modules that need more than their redelk.yml entry: the credentials live under
+    # api_keys, not with the module.
+    alarm_extras = {
+        "filehash": {
+            "vt_api_key": api_keys["virustotal"],
+            "ibm_basic_auth": api_keys["ibm_xforce"],
+            "ha_api_key": api_keys["hybrid_analysis"],
+        },
+    }
+    enrich_extras = {
+        "greynoise": {"api_key": api_keys["greynoise"]},
+        "domainscategorization": {
+            "ibm_basic_auth": api_keys["ibm_xforce"],
+            "vt_api_key": api_keys["virustotal"],
+        },
+    }
+
     return {
         "loglevel": str(modules["loglevel"]).upper(),
         "interval": modules["interval"],
@@ -538,42 +555,16 @@ def as_daemon_config(config: Config) -> dict[str, Any]:
                 "urls": list(notifications["apprise"]["urls"] or []),
             },
         },
+        # Derived from the registries rather than listed again. Adding a module used to mean
+        # editing four places - the schema defaults, the registry, this mapping and the daemon's
+        # own defaults - and forgetting this one produced a module that validated, documented and
+        # shipped, but was absent from config.json and so never ran.
         "alarms": {
-            "alarm_filehash": alarm(
-                "filehash",
-                {
-                    "vt_api_key": api_keys["virustotal"],
-                    "ibm_basic_auth": api_keys["ibm_xforce"],
-                    "ha_api_key": api_keys["hybrid_analysis"],
-                },
-            ),
-            "alarm_httptraffic": alarm("httptraffic"),
-            "alarm_useragent": alarm("useragent"),
-            "alarm_backendalarm": alarm("backendalarm"),
-            "alarm_newimplant": alarm("newimplant"),
-            "alarm_newcredentials": alarm("newcredentials"),
-            "alarm_manual": alarm("manual"),
-            "alarm_dummy": alarm("dummy"),
+            f"alarm_{name}": alarm(name, alarm_extras.get(name)) for name in schema.ALARM_MODULES
         },
         "enrich": {
-            "enrich_csbeacon": enrich("csbeacon"),
-            "enrich_stage1": enrich("stage1"),
-            "enrich_sliver": enrich("sliver"),
-            "enrich_mythic": enrich("mythic"),
-            "enrich_outflankc2": enrich("outflankc2"),
-            "enrich_ttp": enrich("ttp"),
-            "enrich_greynoise": enrich("greynoise", {"api_key": api_keys["greynoise"]}),
-            "enrich_tor": enrich("tor"),
-            "enrich_iplists": enrich("iplists"),
-            "enrich_synciplists": enrich("synciplists"),
-            "enrich_syncdomainslists": enrich("syncdomainslists"),
-            "enrich_domainscategorization": enrich(
-                "domainscategorization",
-                {
-                    "ibm_basic_auth": api_keys["ibm_xforce"],
-                    "vt_api_key": api_keys["virustotal"],
-                },
-            ),
+            f"enrich_{name}": enrich(name, enrich_extras.get(name))
+            for name in schema.ENRICH_MODULES
         },
     }
 

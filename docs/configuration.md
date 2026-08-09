@@ -40,6 +40,7 @@ Check your file with:
 | `server.hostnames` | list of strings | *(none - REQUIRED)* | Every DNS name the server is reachable on. The first is the primary: it is the certificate's common name, `EXTERNAL_DOMAIN` for Kibana's public base URL, the Let's Encrypt domain, and the default ingest host. Bare DNS names only - no scheme, no port. |
 | `server.ips` | list of strings | `[]` | Extra IP addresses to put in the server certificate's SAN. Needed when shippers connect by IP. |
 | `server.profile` | `full` \| `limited` | `full` | `full` = Elastic stack + Jupyter + BloodHound CE (Neo4j + Postgres), >= 8 GB RAM. `limited` = Elastic stack only, >= 4 GB. Implemented as the `full` docker compose profile. |
+| `server.es_proxy` | boolean | `false` | Expose Elasticsearch through nginx at `/es`, for notebooks, reporting scripts and curl, without opening 9200 or distributing the cluster certificate. Behind the same basic auth as the rest of the site and authenticated to Elasticsearch as the `redelk` user rather than `elastic` - but past that auth it is a working Elasticsearch API, so switching it on makes your htpasswd credentials cluster credentials. |
 | `server.ingest_host` | string | `""` | The address shippers connect to. Empty means `hostnames[0]`. Set it when the shippers reach you on a different name than the one you browse to (NAT, split horizon). |
 | `server.ingest_port` | number | `5044` | Published port of the Logstash beats input, and the port in every generated `filebeat.yml`. |
 

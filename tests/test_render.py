@@ -411,6 +411,70 @@ def test_the_nginx_configuration_renders_without_placeholders(generated, elkserv
 
 
 # ------------------------------------------------------------------------------------------------
+# server.es_proxy
+#
+# Exposing Elasticsearch at /es is opt-in because past nginx's basic auth it is a working
+# Elasticsearch API, not a read-only view: it turns the htpasswd accounts into cluster accounts.
+# ------------------------------------------------------------------------------------------------
+
+
+def nginx_config(cfg, elkserver, result):
+    render.render_nginx(cfg, elkserver, result)
+    return (elkserver / "mounts" / "nginx-config" / "default.conf.template").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_elasticsearch_is_not_exposed_by_default(generated, elkserver, result):
+    content = nginx_config(generated(), elkserver, result)
+
+    assert "location ~ ^/es" not in content
+    assert "redelk-elasticsearch:9200" not in content
+
+
+def test_the_es_proxy_is_rendered_when_it_is_switched_on(generated, elkserver, result):
+    cfg = generated()
+    cfg.raw["server"]["es_proxy"] = True
+    content = nginx_config(cfg, elkserver, result)
+
+    assert "location ~ ^/es" in content
+    assert "proxy_pass https://redelk-elasticsearch:9200$1$is_args$args;" in content
+    # Behind the same basic auth as everything else, not open.
+    assert "auth_basic_user_file /etc/nginx/conf.d/htpasswd.users;" in content
+    # The internal certificate is verified rather than ignored.
+    assert "proxy_ssl_verify on;" in content
+
+
+def test_the_es_proxy_authenticates_as_redelk_not_elastic(generated, elkserver, result):
+    """A superuser handle behind one htpasswd account is a much bigger grant than it looks."""
+    import base64
+
+    cfg = generated()
+    cfg.raw["server"]["es_proxy"] = True
+    content = nginx_config(cfg, elkserver, result)
+
+    expected = base64.b64encode(f"redelk:{cfg.secrets['redelk_password']}".encode("utf-8")).decode(
+        "ascii"
+    )
+    assert f'proxy_set_header Authorization "Basic {expected}";' in content
+    assert cfg.secrets["elastic_password"] not in content
+
+
+def test_the_elasticsearch_credential_never_reaches_the_container_environment(
+    generated, elkserver, result
+):
+    """Rendered into the file, not left to envsubst: the environment is readable by anything in
+    the container and by `docker inspect`."""
+    cfg = generated()
+    cfg.raw["server"]["es_proxy"] = True
+    content = nginx_config(cfg, elkserver, result)
+
+    assert "${ES_PROXY_AUTH}" not in content
+    # The plaintext password itself must never appear - only the base64 of user:password.
+    assert cfg.secrets["redelk_password"] not in content
+
+
+# ------------------------------------------------------------------------------------------------
 # Client packages
 # ------------------------------------------------------------------------------------------------
 
