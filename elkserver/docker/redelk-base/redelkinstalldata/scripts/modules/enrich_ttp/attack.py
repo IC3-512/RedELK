@@ -61,6 +61,10 @@ SEARCH_PATHS = [
 ]
 
 
+# path -> parsed dictionary, so a long-lived daemon parses the corpus once. See load().
+_DICTIONARY_CACHE: dict = {}
+
+
 class AttackDictionaryError(Exception):
     """The ATT&CK dictionary is missing or unusable."""
 
@@ -111,14 +115,36 @@ class AttackDictionary:
 
     @classmethod
     def load(cls, path=None):
-        """Load the dictionary from `path`, $REDELK_ATTACK_DICT or the shipped location."""
+        """Load the dictionary from `path`, $REDELK_ATTACK_DICT or the shipped location.
+
+        Parsed once per file per process. The daemon is long-lived now, and re-reading and
+        re-parsing the whole ATT&CK corpus on every run is pure waste - a cost that used to be paid
+        once a run under cron and would be paid on every scheduler tick if Elasticsearch were
+        unreachable and every module kept looking due. Keyed on the file's mtime and size, so
+        replacing the dictionary on disk still takes effect without a restart.
+        """
         resolved = find_dictionary(path)
+        try:
+            stat = os.stat(resolved)
+            key = (str(resolved), stat.st_mtime_ns, stat.st_size)
+        except OSError as error:
+            raise AttackDictionaryError(f"Could not read {resolved}: {error}") from error
+
+        cached = _DICTIONARY_CACHE.get(key)
+        if cached is not None:
+            return cached
+
         try:
             with open(resolved, encoding="utf-8") as handle:
                 data = json.load(handle)
         except (OSError, ValueError) as error:
             raise AttackDictionaryError(f"Could not read {resolved}: {error}") from error
-        return cls(data, resolved)
+
+        dictionary = cls(data, resolved)
+        # Only ever one entry: a new mtime replaces the old rather than growing the cache.
+        _DICTIONARY_CACHE.clear()
+        _DICTIONARY_CACHE[key] = dictionary
+        return dictionary
 
     def __len__(self):
         return len(self.techniques)

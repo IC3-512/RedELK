@@ -69,6 +69,8 @@ NOTIFICATION_CHANNELS = ("email", "slack", "msteams", "alertmanager", "apprise")
 # The subset configured with nothing but an https webhook URL.
 WEBHOOK_CHANNELS = ("slack", "msteams")
 LOGLEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+# Apprise urgencies, mapped by each service onto its own priority scheme.
+APPRISE_PRIORITIES = ("info", "success", "warning", "failure")
 
 # Names are used as filenames, container hostnames and Elasticsearch field values.
 NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$")
@@ -165,7 +167,9 @@ DEFAULTS: dict[str, Any] = {
         # One library, a hundred-odd services. Each entry is an Apprise URL, e.g.
         # ntfys://host/topic (ntfys is HTTPS - plain ntfy:// is port 80 and will be refused
         # by a TLS-only instance), matrixs://user:pass@host/#room, gotify://host/token, ...
-        "apprise": {"enabled": False, "urls": []},
+        # priority maps an alarm submodule to an urgency apprise translates per service
+        # (ntfy priority, Pushover priority, ...): info | success | warning | failure.
+        "apprise": {"enabled": False, "urls": [], "priority": {}},
     },
     "api_keys": {
         "virustotal": "",
@@ -174,7 +178,7 @@ DEFAULTS: dict[str, Any] = {
         "greynoise": "",
     },
     "modules": {
-        "interval": 60,
+        "interval": 5,
         "loglevel": "WARNING",
         "alarms": {
             "filehash": {"enabled": False, "interval": 300},
@@ -192,7 +196,7 @@ DEFAULTS: dict[str, Any] = {
             # Your own operation rather than the blue team: the first check-in of an implant and
             # anything the operation collects. Off by default - on a busy engagement they are
             # chatty, and whether that is signal or noise depends on the operation.
-            "newimplant": {"enabled": False, "interval": 60},
+            "newimplant": {"enabled": False, "interval": 5},
             "newcredentials": {"enabled": False, "interval": 60},
             "manual": {"enabled": False, "interval": 300},
             "dummy": {"enabled": False, "interval": 300},
@@ -609,6 +613,15 @@ def _validate_notification_extras(notifications: dict[str, Any], errors: list[st
             errors.append("notifications.alertmanager.labels: expected a mapping of label -> value")
 
     apprise = notifications["apprise"]
+    if not isinstance(apprise.get("priority", {}), dict):
+        errors.append("notifications.apprise.priority: expected a mapping of alarm name -> urgency")
+    else:
+        for alarm_name, urgency in apprise.get("priority", {}).items():
+            if str(urgency).strip().lower() not in APPRISE_PRIORITIES:
+                errors.append(
+                    f"notifications.apprise.priority.{alarm_name}: expected one of "
+                    + ", ".join(APPRISE_PRIORITIES)
+                )
     if apprise["enabled"]:
         urls = apprise["urls"]
         if not isinstance(urls, list) or not [u for u in urls if str(u).strip()]:

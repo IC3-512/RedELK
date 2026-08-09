@@ -452,6 +452,7 @@ def get_last_run(module_name: str) -> datetime.datetime:
     timestamp = get_value("_source.module.last_run.timestamp", result)
     if not timestamp:
         return epoch
+
     return parse_timestamp(timestamp, default=epoch)
 
 

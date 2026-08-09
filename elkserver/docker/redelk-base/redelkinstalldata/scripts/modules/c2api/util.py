@@ -45,6 +45,11 @@ _UNSAFE_PATH_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 UTC = datetime.timezone.utc
 
 
+# Files served by nginx out of /var/www/html/c2logs. tempfile.mkstemp creates 0600, which
+# nginx cannot read - every download and screenshot 403d until this was applied.
+FILE_MODE = 0o644
+
+
 def decode_maybe_base64(value: Any, default: str = "") -> str:
     """Return `value` as text, base64-decoding it when that is what it turns out to be.
 
@@ -254,13 +259,6 @@ def parse_timestamp(value: Any) -> datetime.datetime | None:
     except ValueError:
         return None
     return parsed.astimezone(UTC)
-
-
-def to_iso(when: datetime.datetime) -> str:
-    """Format a datetime the way Elasticsearch's default date parser reads it."""
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=UTC)
-    return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def daily_index(prefix: str, when: datetime.datetime) -> str:

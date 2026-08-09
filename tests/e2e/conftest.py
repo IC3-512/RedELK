@@ -1078,11 +1078,17 @@ def _require_docker_exec(what: str) -> None:
 
 @pytest.fixture(scope="session")
 def run_daemon(redelk_lab: Lab, elasticsearch: ElasticsearchClient) -> Callable[..., DaemonRun]:
-    """Run the RedELK daemon once inside redelk-base and return its output.
+    """Run one RedELK daemon pass inside redelk-base and return its output.
 
-    The daemon is what cron runs every minute, and every module decides for itself whether its
-    interval has elapsed - so a module that ran a minute ago silently does nothing. The recorded
-    run times live in the redelk-modules index and are cleared here first.
+    Every module decides for itself whether its interval has elapsed, so a module that ran recently
+    silently does nothing. The recorded run times live in the redelk-modules index and are cleared
+    here first.
+
+    --once because daemon.py is a long-lived scheduler; without it this would never return.
+    --ignore-lock because that scheduler holds the lock for the life of the container, so a forced
+    pass can never acquire it. The pass can therefore overlap with the scheduler's own, which is
+    fine here: the tests assert on what reached Elasticsearch, and the modules tag what they
+    process.
     """
 
     def _run(
@@ -1103,22 +1109,25 @@ def run_daemon(redelk_lab: Lab, elasticsearch: ElasticsearchClient) -> Callable[
                 elasticsearch.delete_by_query("redelk-modules")
 
         for attempt in range(1, attempts + 1):
-            # As the redelk user, not root: cron runs it as redelk, and running it as root is
-            # exactly how "the daemon cannot read its own 0600 config.json" stayed hidden.
+            # As the redelk user, not root: the container runs it as redelk, and running it as root
+            # is exactly how "the daemon cannot read its own 0600 config.json" stayed hidden.
             result = redelk_lab.exec(
-                "base", "python3", DAEMON_PATH, user="redelk", check=False, timeout=timeout
+                "base",
+                "python3",
+                DAEMON_PATH,
+                "--once",
+                "--ignore-lock",
+                user="redelk",
+                check=False,
+                timeout=timeout,
             )
             run = DaemonRun(result.returncode, result.stdout, result.stderr)
-            # cron fires the same script every minute; if it holds the lock our run is a no-op.
-            if "another daemon run is still in progress" not in run.output:
+            if "another daemon is already running" not in run.output:
                 return run
             print(f"[e2e] the daemon lock was held (attempt {attempt}/{attempts}); waiting")
             time.sleep(10)
 
-        raise WaitTimeout(
-            f"the daemon lock in {BASE_CONTAINER} was held for {attempts} attempts; "
-            "cron may be stuck on a run that never finishes"
-        )
+        raise WaitTimeout(f"the daemon in {BASE_CONTAINER} refused to run for {attempts} attempts")
 
     return _run
 

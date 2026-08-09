@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 
-from modules.c2api.util import safe_component
+from modules.c2api.util import FILE_MODE, safe_component
 
 WWW_ROOT = "/var/www/html"
 C2LOGS_ROOT = f"{WWW_ROOT}/c2logs"
@@ -77,6 +77,14 @@ class FileStore:
         thumb_path = f"{path}.thumb.jpg"
         if self.exists(thumb_path):
             return thumb_path
+
+        # Written to a temporary name and moved into place. Saving straight to thumb_path let nginx
+        # serve a half-written JPEG, and because exists() only asks whether the file is non-empty,
+        # a truncated one was then treated as done and never regenerated - so a single crash or a
+        # full disk left a permanently broken thumbnail in the screenshot dashboard.
+        directory = os.path.dirname(thumb_path) or "."
+        base = os.path.basename(thumb_path)
+        temp_path = os.path.join(directory, f".{base}.tmp")
         try:
             from PIL import Image  # pylint: disable=import-outside-toplevel
 
@@ -84,8 +92,15 @@ class FileStore:
                 image = image.convert("RGB")
                 width = max(1, int(image.width * (THUMBNAIL_HEIGHT / float(image.height))))
                 # Image.ANTIALIAS was removed in Pillow 10; LANCZOS is the same filter.
-                image.resize((width, THUMBNAIL_HEIGHT), Image.LANCZOS).save(thumb_path, "JPEG")
+                image.resize((width, THUMBNAIL_HEIGHT), Image.LANCZOS).save(temp_path, "JPEG")
+            # mkstemp-style 0600 would 403 in nginx; match what the rest of the store writes.
+            os.chmod(temp_path, FILE_MODE)
+            os.replace(temp_path, thumb_path)
             return thumb_path
         except Exception as error:  # pylint: disable=broad-except
             logger.warning("could not create a thumbnail for %s: %s", path, error)
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
             return None

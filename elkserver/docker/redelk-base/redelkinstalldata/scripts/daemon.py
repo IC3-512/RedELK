@@ -5,7 +5,13 @@ Part of RedELK
 Runs the enrichment modules, then the alarm modules, then hands the alarms to the notification
 connectors.
 
-Called once a minute by cron. Each module decides for itself whether its interval has elapsed.
+Runs as a long-lived scheduler, waking every `modules.interval` seconds. Each module decides for
+itself whether its own interval has elapsed, so the tick sets the floor on how quickly anything can
+be noticed and the per-module interval sets how often each one actually works.
+
+This used to be a `* * * * *` cron entry, which put a one-minute floor under every alarm no matter
+how short its interval was. `--once` still runs a single pass, for cron-driven deployments and for
+debugging.
 
 Changes from v2, all of which caused alarms to be lost silently:
   * module_should_run() is inside the per-module try/except, so one bad configuration entry no
@@ -24,13 +30,17 @@ Authors:
 
 from __future__ import annotations
 
+import argparse
 import copy
 import errno
 import fcntl
 import importlib
 import logging
 import logging.handlers
+import signal
 import sys
+import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -39,7 +49,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # module discovery silently found nothing.
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from config import LOGLEVEL, alarms, notifications  # noqa: E402
+from config import INTERVAL, LOGLEVEL, alarms, notifications  # noqa: E402
 from modules.helpers import (  # noqa: E402
     add_alarm_data,
     group_hits,
@@ -81,11 +91,13 @@ def setup_logging() -> None:
 
 
 def acquire_lock():
-    """Prevent two daemon runs from overlapping.
+    """Prevent two daemons from running at once.
 
-    cron fires this every minute and a slow run can easily exceed that. The previous guard used
-    `pgrep -f daemon.py`, which also matched the pgrep process itself and any editor with the
-    file open, and treated any pgrep error as "already running" - permanently stopping alarming.
+    Now that the scheduler is long-lived this mostly guards against a second copy being started by
+    hand, or an old cron entry surviving an upgrade, either of which would double every
+    notification. The previous guard used `pgrep -f daemon.py`, which also matched the pgrep
+    process itself and any editor with the file open, and treated any pgrep error as "already
+    running" - permanently stopping alarming.
     """
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     handle = open(LOCK_PATH, "w", encoding="utf-8")  # pylint: disable=consider-using-with
@@ -273,15 +285,9 @@ def process_alarms(connector_modules: dict, alarm_modules: dict) -> None:
         set_tags(alarm_name, hits)
 
 
-def main() -> int:
-    setup_logging()
-
-    lock = acquire_lock()
-    if lock is None:
-        logger.info("another daemon run is still in progress; skipping this minute")
-        return 0
-
-    alarm_modules, connector_modules, enrich_modules = load_modules()
+def run_once(modules: tuple[dict, dict, dict] | None = None) -> int:
+    """One pass over every module. Returns the number that failed."""
+    alarm_modules, connector_modules, enrich_modules = modules or load_modules()
     run_enrichments(enrich_modules)
     run_alarms(alarm_modules)
     process_alarms(connector_modules, alarm_modules)
@@ -294,8 +300,95 @@ def main() -> int:
     ]
     if failed:
         logger.error("modules that failed this run: %s", ", ".join(failed))
-        return 1
+    return len(failed)
+
+
+def run_forever(tick: int) -> int:
+    """Wake every `tick` seconds and run whichever modules are due.
+
+    This replaces the `* * * * *` cron entry, and the reason is latency rather than tidiness. Under
+    cron nothing could be noticed sooner than the next whole minute no matter how short a module's
+    interval was, which for a new implant check-in is the difference between an operator reacting
+    while somebody is still standing at the machine and reacting after they have walked away.
+
+    The modules are imported once and reused. Each one still gates itself on its own `interval`, so
+    a shorter tick makes fast modules faster without making slow ones busier.
+    """
+    stopping = threading.Event()
+
+    def stop(signum, _frame):
+        logger.info("received signal %s; finishing the current pass and stopping", signum)
+        stopping.set()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    modules = load_modules()
+    logger.info("scheduler started with a %d second tick", tick)
+
+    while not stopping.is_set():
+        started = time.monotonic()
+        try:
+            run_once(modules)
+        except Exception as error:  # pylint: disable=broad-except
+            # A crash here must not take the scheduler down: an unhandled error in one pass would
+            # otherwise stop alarming entirely until somebody noticed the container had exited.
+            logger.error("unhandled error during a scheduler pass: %s", error)
+            logger.debug("%s", traceback.format_exc())
+
+        elapsed = time.monotonic() - started
+        if elapsed > tick:
+            # Not fatal - the next pass just starts late. Worth saying out loud, because it means
+            # the configured tick is not the latency the operator actually gets.
+            logger.warning(
+                "a pass took %.1fs, longer than the %ds tick; alarms are running behind",
+                elapsed,
+                tick,
+            )
+        stopping.wait(max(0.0, tick - elapsed))
+
+    logger.info("scheduler stopped")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the RedELK alarm, enrichment and C2 modules.")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="run a single pass and exit, instead of scheduling continuously",
+    )
+    parser.add_argument(
+        "--ignore-lock",
+        action="store_true",
+        help=(
+            "run even when another daemon holds the lock. For debugging and the e2e tests: the "
+            "scheduler holds it for the life of the container, so a forced pass cannot get it. "
+            "Can overlap with the running daemon."
+        ),
+    )
+    parser.add_argument(
+        "--tick",
+        type=int,
+        default=INTERVAL,
+        help="seconds between passes (default: modules.interval from redelk.yml)",
+    )
+    args = parser.parse_args(argv)
+
+    setup_logging()
+
+    lock = None if args.ignore_lock else acquire_lock()
+    if lock is None and not args.ignore_lock:
+        logger.info("another daemon is already running; exiting")
+        return 0
+
+    if args.once:
+        return 1 if run_once() else 0
+
+    tick = args.tick if args.tick > 0 else 60
+    if tick != args.tick:
+        logger.warning("invalid tick %r; falling back to %d seconds", args.tick, tick)
+    return run_forever(tick)
 
 
 if __name__ == "__main__":

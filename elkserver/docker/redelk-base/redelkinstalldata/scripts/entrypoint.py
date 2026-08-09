@@ -5,8 +5,9 @@ Part of RedELK
 Container entrypoint for redelk-base.
 
 Replaces the phusion my_init + 42_redelk-base-docker-init.sh combination. It fixes up the
-permissions of the bind-mounted directories, kicks off provisioning in the background, and then
-hands PID 1 duties to cron, which is what actually runs the RedELK modules.
+permissions of the bind-mounted directories, kicks off provisioning in the background, starts cron
+for the periodic housekeeping jobs, and then hands the foreground to daemon.py, which schedules the
+alarm, enrichment and C2 modules itself.
 
 Authors:
 - RedELK contributors
@@ -99,13 +100,31 @@ def start_bootstrap() -> subprocess.Popen:
     )
 
 
+def start_cron() -> subprocess.Popen | None:
+    """Run cron in the background for the periodic housekeeping jobs.
+
+    cron no longer runs the modules - the daemon schedules those itself - but it still owns pulling
+    C2 artefacts, thumbnailing them and refreshing the Tor and rogue-domain lists.
+    """
+    logger.info("starting cron")
+    try:
+        return subprocess.Popen(["cron", "-f", "-L", "1"])
+    except OSError as error:
+        # Worth continuing: alarming is what the container is for, and it no longer needs cron.
+        logger.error("could not start cron, periodic jobs will not run: %s", error)
+        return None
+
+
 def main() -> int:
     fix_permissions()
     start_bootstrap()
+    start_cron()
 
-    logger.info("starting cron")
-    # cron becomes the long-running foreground process; tini is PID 1 and reaps everything.
-    os.execvp("cron", ["cron", "-f", "-L", "1"])
+    logger.info("starting the RedELK daemon")
+    # The daemon becomes the long-running foreground process, so if it dies the container dies and
+    # docker restarts it. Under cron a crashed daemon left a healthy-looking container that had
+    # quietly stopped alarming. tini is PID 1 and reaps cron and the bootstrap process.
+    os.execvp(sys.executable, [sys.executable, "/usr/share/redelk/bin/daemon.py"])
     return 0  # unreachable
 
 

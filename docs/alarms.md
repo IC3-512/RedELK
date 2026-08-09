@@ -1,14 +1,16 @@
 # Alarms and enrichment
 
-Everything in this document runs inside the `redelk-base` container, is started by `daemon.py`
-once a minute, and is switched on or off in `redelk.yml` under `modules:`. The mechanics of the
-loop are in [architecture.md](architecture.md#the-redelk-base-module-loop).
+Everything in this document runs inside the `redelk-base` container, is scheduled by `daemon.py`,
+and is switched on or off in `redelk.yml` under `modules:`. The mechanics of the loop are in
+[architecture.md](architecture.md#the-redelk-base-module-loop).
 
 Two rules that explain most of the behaviour you will observe:
 
 - **Every module decides for itself whether to run.** `module_should_run()` checks `enabled` and
-  compares the module's last run in the `redelk-modules` index against its `interval`. The daemon
-  wakes up every minute regardless.
+  compares the module's last run against its `interval`. The daemon wakes up every
+  `modules.interval` seconds (default 5) regardless, so that value is the floor under every alarm's
+  latency: a module set to 5 while the tick is 60 gets 60. It used to be a cron entry, which meant
+  the floor was a minute no matter what any module asked for.
 - **Processed documents are tagged.** After a module returns, the daemon adds the module's
   `submodule` name to `tags[]` on every hit. Nearly every module's query ends in
   `NOT tags:<submodule>`, so work is never repeated. If you want a module to reprocess something,

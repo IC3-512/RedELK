@@ -215,8 +215,8 @@ def test_rogue_useragent_is_alarmed(
 ):
     """A rogue user agent on a c2* backend is tagged and stamped by alarm_useragent.
 
-    Both halves are asserted. The tag is what stops the alarm from firing on the same request
-    every minute for the rest of the operation; alarm.last_alarmed is what the Alarms dashboard
+    Both halves are asserted. The tag is what stops the alarm from firing on the same request on
+    every tick for the rest of the operation; alarm.last_alarmed is what the Alarms dashboard
     sorts on, and an alarm that is only tagged is invisible there.
 
     The request is appended to the log Filebeat tails rather than indexed directly, so it travels
@@ -255,9 +255,9 @@ def test_rogue_useragent_is_alarmed(
     )
 
     def _alarmed() -> list[dict]:
-        # The daemon is also fired by cron every minute; run_daemon retries while that run holds
-        # the lock, and a module that already ran within its interval does nothing - hence the
-        # explicit run per attempt rather than one run and a wait.
+        # The container's own scheduler is running too, and a module that already ran within its
+        # interval does nothing - hence the explicit forced pass per attempt rather than one pass
+        # and a wait.
         run_daemon(ALARM)
         elasticsearch.refresh(INDEX)
         return [

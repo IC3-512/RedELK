@@ -207,14 +207,21 @@ def _docker_version() -> str:
     return f"engine {probe.stdout.strip()}" if probe.returncode == 0 else "available"
 
 
+def _read_max_map_count() -> int | None:
+    """The current vm.max_map_count, or None if it cannot be read."""
+    try:
+        return int(Path("/proc/sys/vm/max_map_count").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
 def _check_max_map_count(report: Report, *, fix: bool) -> None:
     """Elasticsearch refuses to start when vm.max_map_count is below 262144."""
-    path = Path("/proc/sys/vm/max_map_count")
     required = 262144
-    if not path.is_file():
+    current = _read_max_map_count()
+    if current is None:
         report.add("vm.max_map_count", WARN, "not readable on this platform")
         return
-    current = int(path.read_text().strip())
     if current >= required:
         report.add("vm.max_map_count", OK, str(current))
         return
@@ -238,14 +245,38 @@ def _check_max_map_count(report: Report, *, fix: bool) -> None:
     subprocess.run(
         ["sysctl", "-w", f"vm.max_map_count={required}"], check=False, capture_output=True
     )
+    # Re-read rather than trust the write. sysctl -w fails on a read-only /proc - an unprivileged
+    # container, a hardened host, an Incus/LXC guest that does not own the host kernel - and
+    # reporting OK from the return of a command we deliberately do not check turns doctor from the
+    # thing that catches this into the thing that hides it. Elasticsearch then dies at startup with
+    # a max_map_count error the operator was just told could not happen.
+    now = _read_max_map_count()
+    if now is None or now < required:
+        report.add(
+            "vm.max_map_count",
+            FAIL,
+            f"still {now if now is not None else 'unreadable'}, Elasticsearch needs {required}",
+            "the sysctl did not take - on LXC/Incus or a read-only /proc it must be set on the host",
+        )
+        return
+
     # Persist it. The old installer appended to /etc/sysctl.conf with a doubled redirection, so
     # the line went to its log file and the setting never survived a reboot.
     conf = Path("/etc/sysctl.d/99-redelk.conf")
-    conf.write_text(
-        "# Set by RedELK: Elasticsearch requires at least 262144 memory map areas.\n"
-        f"vm.max_map_count={required}\n",
-        encoding="utf-8",
-    )
+    try:
+        conf.write_text(
+            "# Set by RedELK: Elasticsearch requires at least 262144 memory map areas.\n"
+            f"vm.max_map_count={required}\n",
+            encoding="utf-8",
+        )
+    except OSError as error:
+        report.add(
+            "vm.max_map_count",
+            WARN,
+            f"raised to {required}, but it will not survive a reboot: {error}",
+            f"create {conf} by hand with vm.max_map_count={required}",
+        )
+        return
     report.add("vm.max_map_count", OK, f"raised to {required} and persisted in {conf}")
 
 

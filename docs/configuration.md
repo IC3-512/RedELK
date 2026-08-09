@@ -210,7 +210,7 @@ Cross-checks performed by `validate`:
 
 | Key | Type | Default | Affects |
 |---|---|---|---|
-| `modules.interval` | number | `60` | How often the daemon wakes up, in seconds. It is started by cron every minute; this value is recorded in `config.json` for the modules. |
+| `modules.interval` | number | `5` | Seconds between scheduler passes - the floor under how quickly any alarm can fire. Each module still gates itself on its own `interval`, so lowering this only speeds up modules that asked to run often. |
 | `modules.loglevel` | one of `DEBUG` `INFO` `WARNING` `ERROR` `CRITICAL` | `WARNING` | Log level of the daemon and every module. Logs go to `elkserver/mounts/redelk-logs/daemon.log` (rotated at 50 MB, 2 backups) and to the container's stdout. |
 
 ### `modules.alarms.<name>`

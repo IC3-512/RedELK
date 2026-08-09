@@ -28,6 +28,7 @@ from typing import Any, Iterable
 from urllib.parse import urljoin, urlsplit
 
 import requests
+from modules.c2api.util import FILE_MODE
 
 # Fallback only: callers pass modules.helpers.HTTP_TIMEOUT. Importing helpers here would pull
 # Elasticsearch and /etc/redelk/config.json into the connectors' offline unit tests.
@@ -39,7 +40,6 @@ CHUNK_SIZE = 64 * 1024
 
 # Downloaded files land in the nginx web root and exist to be served from it, so they have to be
 # readable by the nginx worker. They are already behind the server's basic auth.
-FILE_MODE = 0o644
 
 # Redirects are followed by hand (see ApiClient.request), so they need their own bound.
 MAX_REDIRECTS = 5

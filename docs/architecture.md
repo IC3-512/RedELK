@@ -161,18 +161,20 @@ Canonical fields, all mapped in the templates:
 
 ```mermaid
 sequenceDiagram
-    participant cron
+    participant entry as entrypoint.py
     participant daemon as daemon.py
     participant mod as one module.py
     participant es as Elasticsearch
-    participant conn as connectors<br/>(email/slack/msteams)
+    participant conn as connectors<br/>(email/slack/apprise/...)
 
-    cron->>daemon: every minute
-    daemon->>daemon: flock(/var/lib/redelk/daemon.lock)<br/>skip if a run is still going
+    entry->>daemon: exec, once, at container start
+    daemon->>daemon: flock(/var/lib/redelk/daemon.lock)<br/>exit if another daemon holds it
     daemon->>daemon: import every modules/*/module.py<br/>sort by info["type"]
 
+    loop every modules.interval seconds (default 5)
+
     loop each enrichment module
-        daemon->>es: module_should_run() - enabled? interval elapsed?<br/>(redelk-modules)
+        daemon->>daemon: module_should_run() - enabled? interval elapsed?<br/>(cached; read from redelk-modules once)
         daemon->>mod: Module().run()
         mod->>es: query, enrich, update
         mod-->>daemon: {"hits": {...}, "mutations": {...}}
@@ -192,10 +194,18 @@ sequenceDiagram
         alt at least one connector accepted
             daemon->>es: add_alarm_data() + set_tags(alarm_name)
         else all connectors failed
-            daemon->>daemon: leave documents unmarked, retry next run
+            daemon->>daemon: leave documents unmarked, retry next tick
         end
     end
+
+    end
 ```
+
+`daemon.py` is a long-lived process, not a cron job. cron cannot schedule anything more than once a
+minute, which put a one-minute floor under every alarm however short its interval was - too slow for
+an implant check-in, where the operator wants to react while somebody is still at the machine. cron
+still runs inside the container for the periodic housekeeping (artefact rsync, thumbnails, the Tor
+and rogue-domain refreshes).
 
 Key properties, all of which are behaviour changes from v2:
 

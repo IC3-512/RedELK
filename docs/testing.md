@@ -272,7 +272,7 @@ The fixtures in `tests/e2e/conftest.py`:
 |---|---|
 | `redelk_lab` | The deployment: `.config`, `.secrets`, `.ps()`, `.exec(service, *argv, user=...)`, `.redelkctl(*args)`, `.edit_config(...)`. |
 | `elasticsearch` / `kibana` | Thin JSON clients: `.get()`, `.post()`, `.search()`, `.count()`, `.refresh()`, `.saved_objects()`, ... |
-| `run_daemon` | One real daemon run inside `redelk-base` as the `redelk` user, retrying while cron holds the lock. |
+| `run_daemon` | One forced daemon pass inside `redelk-base` as the `redelk` user (`--once --ignore-lock`, because the container's scheduler holds the lock for its lifetime). |
 | `seed_mythic` | The running `FakeMythic` (`.requests`, `.graphql_queries`, `.server_name`) after the connector has polled it. |
 | `seed_redirector` | The shipped traffic (`.name`, `.log_path`, `.lines`, `.send()`). |
 | `wait_until` | Poll a predicate with a failure message that says what was being waited for. |

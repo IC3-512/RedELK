@@ -504,7 +504,6 @@ def as_daemon_config(config: Config) -> dict[str, Any]:
     return {
         "loglevel": str(modules["loglevel"]).upper(),
         "interval": modules["interval"],
-        "tempDir": "/tmp",
         "project_name": config.project_name,
         "es_connection": [es_connection_string(config)],
         "c2_servers": c2_api_targets,

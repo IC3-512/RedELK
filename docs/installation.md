@@ -138,7 +138,7 @@ Useful flags:
 | `redelk.secrets.yml` | Every generated password and key. Mode `0600`, git-ignored. Created once; existing values are never regenerated, because they are already baked into the running cluster. |
 | `elkserver/.env` | The docker compose environment: image versions, heap sizes, published ports, certificate paths, all `CREDS_*`. Mode `0600`. |
 | `elkserver/mounts/redelk-config/etc/redelk/config.json` | The RedELK daemon's configuration: module enable/interval, notification channels, API keys, and the API-based C2 servers. Mode `0600`. |
-| `elkserver/mounts/redelk-config/etc/cron.d/redelk` | The cron file inside `redelk-base`: the rsync jobs per file-based C2 server, the Tor and rogue-domain refreshes, thumbnailing, and `daemon.py` every minute. |
+| `elkserver/mounts/redelk-config/etc/cron.d/redelk` | The cron file inside `redelk-base`: the rsync jobs per file-based C2 server, the Tor and rogue-domain refreshes, and thumbnailing. The modules are *not* here - `daemon.py` is a long-lived process started by the entrypoint. |
 | `elkserver/mounts/nginx-config/default.conf.template` | The nginx site: TLS, basic auth, the Kibana proxy, `/c2logs`, and (full profile) `/jupyter` and the BloodHound vhost on 8443. |
 | `elkserver/mounts/nginx-config/htpasswd.users.template` | Basic auth for nginx. Exactly one account, `redelk`, hashed with APR1. |
 | `elkserver/mounts/redelk-config/etc/redelk/*.conf` | The IP / domain / user-agent lists, seeded from `lists:` in `redelk.yml`. **Only written when absent** - RedELK keeps them in sync with Elasticsearch at runtime, so regenerating never discards entries you added in Kibana. |

@@ -64,6 +64,7 @@ class FakeElasticsearch:
         self.indexed: list[dict] = []
         self.update_by_queries: list[dict] = []
         self.bulk_operations: list[dict] = []
+        self.gets: list[str] = []
         # Queued responses; the empty response is used once the queue runs dry.
         self.search_responses: list[dict] = []
         self.get_responses: dict[str, dict] = {}
@@ -94,6 +95,7 @@ class FakeElasticsearch:
         return {"result": "created"}
 
     def get(self, *, index, id, **kwargs):  # noqa: A002
+        self.gets.append(id)
         return self.get_responses.get(id, {"found": False})
 
     def update_by_query(self, **kwargs):

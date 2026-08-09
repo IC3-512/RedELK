@@ -43,6 +43,21 @@ info = {
 MAX_ITEMS = 10
 MAX_BODY_CHARS = 3500
 
+# Apprise carries an urgency as a notify_type and each service maps it onto its own scheme - ntfy
+# priority, a Pushover priority, a Discord embed colour. It is worth setting, because a phone that
+# is face-down at 3am treats "an implant just called back" and "a scanner hit a redirector"
+# identically unless something tells it not to.
+#
+# Default: the two alarms about your own operation are the ones worth waking up for; everything
+# else is an observation about the blue team that can wait for the next time the phone is picked
+# up. Override per alarm with notifications.apprise.priority in redelk.yml.
+VALID_PRIORITIES = ("info", "success", "warning", "failure")
+DEFAULT_PRIORITIES = {
+    "alarm_newimplant": "failure",
+    "alarm_newcredentials": "warning",
+}
+FALLBACK_PRIORITY = "info"
+
 
 class Module:  # pylint: disable=too-few-public-methods
     """apprise connector module"""
@@ -72,6 +87,7 @@ class Module:  # pylint: disable=too-few-public-methods
             ) from error
 
         title, body = self.render(alarm)
+        priority = self.priority_for(alarm)
 
         client = apprise.Apprise()
         for url in urls:
@@ -80,12 +96,37 @@ class Module:  # pylint: disable=too-few-public-methods
                 # malformed. Naming it is the whole diagnosis; the operator pasted it.
                 raise ValueError(f"Apprise did not accept the notification URL {self.redact(url)}")
 
-        if not client.notify(title=title, body=body):
+        # Urgency is a nicety and delivery is the point, so an apprise build that does not expose
+        # NotifyType sends the alarm anyway rather than failing over the decoration.
+        notify_types = getattr(apprise, "NotifyType", None)
+        notify_type = getattr(notify_types, priority.upper(), None) if notify_types else None
+        extra = {"notify_type": notify_type} if notify_type is not None else {}
+
+        if not client.notify(title=title, body=body, **extra):
             # notify() is False when *any* target failed. Apprise logs the detail itself.
             raise RuntimeError(
                 f"Apprise failed to deliver to at least one of {len(urls)} configured target(s)"
             )
         self.logger.debug("delivered %s to %d Apprise target(s)", title, len(urls))
+
+    def priority_for(self, alarm) -> str:
+        """Urgency for this alarm: configured, else the default for the alarm, else info."""
+        submodule = str((alarm.get("info") or {}).get("submodule", ""))
+        configured = (config.notifications.get("apprise", {}) or {}).get("priority", {}) or {}
+
+        value = str(configured.get(submodule, "")).strip().lower()
+        if value in VALID_PRIORITIES:
+            return value
+        if value:
+            # Not fatal - an unusable priority must not stop the alarm being delivered, which is
+            # the part that matters.
+            self.logger.warning(
+                "ignoring unknown apprise priority %r for %s; expected one of %s",
+                value,
+                submodule,
+                ", ".join(VALID_PRIORITIES),
+            )
+        return DEFAULT_PRIORITIES.get(submodule, FALLBACK_PRIORITY)
 
     @staticmethod
     def redact(url: str) -> str:

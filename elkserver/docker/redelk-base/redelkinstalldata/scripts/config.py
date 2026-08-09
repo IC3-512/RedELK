@@ -28,8 +28,7 @@ CONFIG_PATH = os.environ.get("REDELK_CONFIG", "/etc/redelk/config.json")
 
 DEFAULTS: dict[str, Any] = {
     "loglevel": "WARNING",
-    "interval": 60,
-    "tempDir": "/tmp",
+    "interval": 5,
     "project_name": "redelk-project",
     "es_connection": ["https://redelk-elasticsearch:9200"],
     "es_ca_certs": "/etc/redelk/certs/ca/ca.crt",
@@ -69,7 +68,7 @@ DEFAULTS: dict[str, Any] = {
         "alarm_useragent": {"enabled": False, "interval": 320},
         "alarm_backendalarm": {"enabled": False, "interval": 320},
         "alarm_dummy": {"enabled": False, "interval": 300},
-        "alarm_newimplant": {"enabled": False, "interval": 60},
+        "alarm_newimplant": {"enabled": False, "interval": 5},
         "alarm_newcredentials": {"enabled": False, "interval": 60},
         "alarm_manual": {"enabled": False, "interval": 300},
     },
@@ -141,8 +140,9 @@ if _loglevel not in LOGLEVELS:
     _loglevel = "WARNING"
 LOGLEVEL = getattr(logging, "WARNING" if _loglevel == "WARN" else _loglevel, logging.WARNING)
 
-TEMP_DIR = data.get("tempDir", "/tmp")
-INTERVAL = int(data.get("interval", 60))
+# Seconds between scheduler passes. daemon.py uses it as its tick; each module still gates
+# itself on its own interval.
+INTERVAL = int(data.get("interval", 5))
 
 notifications = data["notifications"]
 alarms = data["alarms"]

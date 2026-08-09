@@ -275,10 +275,28 @@ api_keys:
 # Alarm and enrichment modules
 #
 # `interval` is the minimum number of seconds between two runs of a module.
+#
+# HOW FAST CAN AN ALARM BE?
+#
+# `modules.interval` below is the scheduler tick - the floor under everything, because nothing can
+# be noticed sooner than the next wake-up. A module's own `interval` then decides how often it
+# actually looks. Setting a module to 5 while the tick is 60 gets you 60.
+#
+# For a new implant that is not the whole story, because the alarm can only fire once the document
+# exists, and how it gets there depends on the C2:
+#
+#   file-based C2 (Cobalt Strike, Stage1)  Filebeat tails the log, so seconds. The tick dominates.
+#   API-based C2 (Mythic, Outflank C2)     RedELK polls the C2, so `enrich.mythic.interval` and the
+#                                          c2_servers[].api.poll_interval are the real floor. A
+#                                          5-second tick with a 60-second poll still means a
+#                                          60-second alert.
+#
+# So for fast check-in alerts on an API-based C2, lower the poll interval too - at the cost of
+# hitting the C2's API twelve times as often.
 ####################################################################################################
 modules:
-  # How often the RedELK daemon wakes up, in seconds.
-  interval: 60
+  # Seconds between scheduler passes. This is the floor on alarm latency.
+  interval: 5
   loglevel: WARNING
 
   alarms:
@@ -289,7 +307,10 @@ modules:
     backendalarm: { enabled: true, interval: 320 }
     # Your own operation rather than the blue team. Pair them with a notification connector -
     # notifications.apprise reaches ntfy, Matrix, Gotify, Signal and the rest from one URL.
-    newimplant: { enabled: false, interval: 60 }
+    #
+    # newimplant runs at the tick: an operator reacting to a check-in while somebody is still at
+    # the machine is a different thing from reacting a minute later.
+    newimplant: { enabled: false, interval: 5 }
     newcredentials: { enabled: false, interval: 60 }
     manual: { enabled: false, interval: 300 }
     dummy: { enabled: false, interval: 300 }

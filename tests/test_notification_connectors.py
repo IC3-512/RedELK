@@ -135,6 +135,7 @@ class FakeApprise:
     def __init__(self):
         self.added: list = []
         self.notified: list = []
+        self.notify_types: list = []
         self.add_result = True
         self.notify_result = True
         FakeApprise.instances.append(self)
@@ -143,8 +144,9 @@ class FakeApprise:
         self.added.append(url)
         return self.add_result
 
-    def notify(self, title="", body=""):
+    def notify(self, title="", body="", notify_type=None):
         self.notified.append((title, body))
+        self.notify_types.append(notify_type)
         return self.notify_result
 
 
@@ -154,6 +156,14 @@ def install_fake_apprise(monkeypatch, add_result=True, notify_result=True):
 
     FakeApprise.instances = []
     fake_module = types.ModuleType("apprise")
+
+    class NotifyType:  # the real apprise exposes these as an enum of the same names
+        INFO = "info"
+        SUCCESS = "success"
+        WARNING = "warning"
+        FAILURE = "failure"
+
+    fake_module.NotifyType = NotifyType
 
     def factory():
         instance = FakeApprise()
@@ -216,3 +226,85 @@ def test_apprise_raises_without_urls(daemon_env):
 
     with pytest.raises(ValueError, match="no urls are configured"):
         module.Module().send_alarm(ALARM)
+
+
+# ------------------------------------------------------------------------------------------------
+# Apprise priority
+#
+# Each service maps notify_type onto its own scheme (ntfy priority, Pushover priority). It matters
+# because a phone treats "an implant just called back" and "a scanner probed a redirector"
+# identically unless something distinguishes them.
+# ------------------------------------------------------------------------------------------------
+
+
+def alarm_named(submodule):
+    alarm = {k: (dict(v) if isinstance(v, dict) else v) for k, v in ALARM.items()}
+    alarm["info"] = dict(ALARM["info"], submodule=submodule)
+    return alarm
+
+
+def test_apprise_wakes_you_for_a_new_implant_but_not_for_a_scanner(daemon_env, monkeypatch):
+    env = connector_env(daemon_env, {"apprise": {"enabled": True, "urls": ["ntfys://host/redelk"]}})
+    module = load(env, "apprise")
+    install_fake_apprise(monkeypatch)
+
+    module.Module().send_alarm(alarm_named("alarm_newimplant"))
+    module.Module().send_alarm(alarm_named("alarm_httptraffic"))
+
+    assert FakeApprise.instances[0].notify_types[0] == "failure"
+    assert FakeApprise.instances[1].notify_types[0] == "info"
+
+
+def test_apprise_priority_can_be_configured_per_alarm(daemon_env, monkeypatch):
+    env = connector_env(
+        daemon_env,
+        {
+            "apprise": {
+                "enabled": True,
+                "urls": ["ntfys://host/redelk"],
+                "priority": {"alarm_httptraffic": "warning"},
+            }
+        },
+    )
+    module = load(env, "apprise")
+    install_fake_apprise(monkeypatch)
+
+    module.Module().send_alarm(alarm_named("alarm_httptraffic"))
+
+    assert FakeApprise.instances[-1].notify_types[0] == "warning"
+
+
+def test_apprise_still_delivers_when_the_priority_is_nonsense(daemon_env, monkeypatch):
+    """An unusable priority must cost the decoration, never the notification."""
+    env = connector_env(
+        daemon_env,
+        {
+            "apprise": {
+                "enabled": True,
+                "urls": ["ntfys://host/redelk"],
+                "priority": {"alarm_newimplant": "SCREAMING"},
+            }
+        },
+    )
+    module = load(env, "apprise")
+    install_fake_apprise(monkeypatch)
+
+    module.Module().send_alarm(alarm_named("alarm_newimplant"))
+
+    assert FakeApprise.instances[-1].notified, "the alarm was not sent"
+    assert FakeApprise.instances[-1].notify_types[0] == "failure"
+
+
+def test_apprise_delivers_on_a_build_without_notifytype(daemon_env, monkeypatch):
+    """Older apprise builds have no NotifyType; the alarm still has to go out."""
+    import sys
+
+    env = connector_env(daemon_env, {"apprise": {"enabled": True, "urls": ["ntfys://host/redelk"]}})
+    module = load(env, "apprise")
+    install_fake_apprise(monkeypatch)
+    delattr(sys.modules["apprise"], "NotifyType")
+
+    module.Module().send_alarm(alarm_named("alarm_newimplant"))
+
+    assert FakeApprise.instances[-1].notified
+    assert FakeApprise.instances[-1].notify_types[0] is None
