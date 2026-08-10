@@ -183,6 +183,17 @@ class MythicSync:
             self._record("error", "could not authenticate to Mythic", 0)
             return 0
 
+        # Before polling: has this Mythic been rebuilt underneath us? Re-provisioning a C2 gives it
+        # a fresh database whose ids restart at 1, while our cursor is still at the old maximum -
+        # after which every poll asks for rows above an id that will never exist again, finds
+        # nothing, and reports success. Ingestion from that server stops permanently and silently.
+        #
+        # Only the callback table is checked. Every other table hangs off a callback, so a rebuilt
+        # Mythic always shows it here, and one aggregate is enough to spot the whole rebuild.
+        if cursor.reset_if_rewound("callback", self.client.max_callback_id):
+            for table in ("task", "filemeta", *APPEND_ONLY):
+                cursor.reset(table)
+
         self.poll_callbacks(cursor)
         self.poll_tasks(cursor)
         self.poll_files(cursor)

@@ -85,6 +85,45 @@ class Cursor:
         if value > self.positions.get(name, 0):
             self.positions[name] = value
 
+    def reset_if_rewound(self, name: str, observed_max: Any) -> bool:
+        """Start over when the C2's database has been rebuilt. Returns True if it reset.
+
+        advance() only ever moves forward, which is right for a stale row and wrong for a new
+        database. Rebuild a C2 - which is a routine thing to do between engagements, and which
+        infrastructure-as-code does on every re-provision - and its row ids restart at 1 while
+        RedELK's cursor is still sitting at the old maximum. Every subsequent poll asks for
+        `id > 4711`, gets nothing, and reports success. Ingestion from that server is over, for
+        good, and the only symptom is that no new data arrives.
+
+        A maximum id below the cursor cannot happen on a database that is merely idle, so it is an
+        unambiguous signal rather than a heuristic.
+        """
+        value = coerce_int(observed_max)
+        if value is None:
+            return False
+
+        position = self.positions.get(name, 0)
+        if position <= value:
+            return False
+
+        logger.warning(
+            "%s: the highest %s id on the server is %d but the cursor is at %d, so the C2's "
+            "database has been rebuilt. Resetting the cursor - without this, every future poll "
+            "would return nothing and report success.",
+            self.doc_id,
+            name,
+            value,
+            position,
+        )
+        self.positions.pop(name, None)
+        self.pending.pop(name, None)
+        return True
+
+    def reset(self, name: str) -> None:
+        """Forget everything about one object type, so the next poll starts from the beginning."""
+        self.positions.pop(name, None)
+        self.pending.pop(name, None)
+
     def get_pending(self, name: str) -> list[int]:
         """Ids of unfinished objects that have to be polled again."""
         return list(self.pending.get(name, []))

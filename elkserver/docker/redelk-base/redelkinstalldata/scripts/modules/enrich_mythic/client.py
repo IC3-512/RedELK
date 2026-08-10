@@ -49,7 +49,13 @@ _AUTH_ERROR_MARKERS = (
 )
 
 # A query cheap enough to run once per poll to find out whether the credentials work at all.
-PING_QUERY = "query RedELKPing { callback(limit: 1) { id } }"
+# The aggregate rides along on the probe rather than costing its own round trip. It is what
+# tells the cursor that Mythic's database has been rebuilt: ids restart at 1 while the stored
+# cursor is still at the old maximum, and every later poll then returns nothing and reports
+# success. See Cursor.reset_if_rewound.
+PING_QUERY = (
+    "query RedELKPing { callback(limit: 1) { id } callback_aggregate { aggregate { max { id } } } }"
+)
 
 
 class MythicClient:
@@ -78,6 +84,9 @@ class MythicClient:
         )
         # Which selection set worked per table, remembered for the rest of the run.
         self.variants: dict[str, int] = {}
+        # Highest callback id the server reports, refreshed by every probe. None when the
+        # server does not expose the aggregate.
+        self.max_callback_id = None
 
     # ----------------------------------------------------------------------------------------
     # Authentication
@@ -166,6 +175,13 @@ class MythicClient:
             return False, "error"
         if data is None:
             return False, "unreachable"
+
+        # Best effort: an older Mythic that does not expose the aggregate still probes fine, it
+        # just does not get rewind detection.
+        try:
+            self.max_callback_id = data["callback_aggregate"]["aggregate"]["max"]["id"]
+        except (KeyError, TypeError):
+            self.max_callback_id = None
         return True, ""
 
     # ----------------------------------------------------------------------------------------
