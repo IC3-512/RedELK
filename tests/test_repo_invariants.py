@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -523,4 +524,55 @@ def test_every_module_on_disk_is_registered(prefix, registry):
     assert not missing, (
         f"schema.{registry} lists {sorted(missing)} but there is no {prefix}<name>/module.py, "
         "so redelk.yml documents a module that cannot load"
+    )
+
+
+# ------------------------------------------------------------------------------------------------
+# The shared redirector enrichment
+#
+# 20/21/22 parse per redirector program; 23 carries the geoip / reverse-DNS / IPv6 enrichment they
+# used to hold a copy of each. Logstash concatenates conf.d lexically, so 23 must sort after them,
+# and its guard must name every program - miss either and that redirector's traffic is ingested
+# without source.geo, source.as or source.domain, silently. Nothing at runtime warns about it.
+# ------------------------------------------------------------------------------------------------
+
+CONF_D = REPO_ROOT / "elkserver/mounts/logstash-config/redelk-main/conf.d"
+
+
+def redir_common() -> Path:
+    """The shared redirector filter, found by shape rather than by its number.
+
+    Deliberately not a hardcoded '23-...': the number is the thing under test, and pinning it here
+    would make the ordering test pass by reading a missing file instead of by checking order.
+    """
+    matches = sorted(CONF_D.glob("*-filter-redir-common*.conf"))
+    assert len(matches) == 1, f"expected exactly one shared redirector filter, found {matches}"
+    return matches[0]
+
+
+def test_the_shared_redirector_filter_names_every_redirector_type():
+    from redelk_setup import schema
+
+    common = redir_common()
+    guard = common.read_text(encoding="utf-8")
+    missing = [t for t in schema.REDIR_TYPES if f'"{t}"' not in guard]
+
+    assert not missing, (
+        f"{sorted(missing)} are valid redirector types in schema.REDIR_TYPES but do not appear in "
+        f"the guard of {common.name}. Their traffic would be ingested unenriched - no "
+        "source.geo, no source.as, no reverse DNS - with nothing to indicate it."
+    )
+
+
+def test_the_shared_redirector_filter_sorts_after_the_per_program_ones():
+    """Lexical order is the only thing sequencing conf.d, so the number is load-bearing."""
+    common = redir_common()
+    per_program = sorted(
+        p.name for p in CONF_D.glob("*-filter-redir-*.conf") if p.name != common.name
+    )
+
+    assert per_program, "no per-program redirector filters found; this invariant is now wrong"
+    assert all(name < common.name for name in per_program), (
+        f"{common.name} must sort after every per-program redirector filter "
+        f"({per_program}), or the enrichment runs before the fields it reads exist."
     )

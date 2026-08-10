@@ -81,6 +81,7 @@ list without rebuilding an image.
 | `11-input_localfiles_logstash.conf` | Reads `/var/log/redelk/redteamdomaincheck.txt` produced by the rogue-domain check. |
 | `12-input_email_logstash.conf` | Optional IMAP inputs. Every block is commented out on purpose - an `imap` input with an empty host makes Logstash refuse to start. |
 | `20/21/22-filter-redir-*` | Parse haproxy, apache and nginx access logs into `redirtraffic`. |
+| `23-filter-redir-common` | The IPv6 normalisation, geoip and reverse DNS all three share. Has to keep sorting after 22 - it enriches the fields they grok out. |
 | `30-filter-email` | Parses the IMAP events. |
 | `50/51/52/53-filter-c2-*` | Parse Outflank Stage1, Cobalt Strike, PoshC2 and Sliver logs into `rtops`. |
 | `70-filter-pstools` | Parses PowerShell/PsTools style output embedded in C2 messages. |
