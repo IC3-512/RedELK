@@ -7,10 +7,17 @@
 # belongs in redelk.yml instead.
 ####################################################################################################
 
-# redelkctl writes root-owned files (0600 .env, TLS keys) and install.py needs root on the
-# shippers, so every play escalates. Passwordless sudo is required: the repository is copied with
-# rsync, which runs 'sudo rsync' on the far end and cannot answer a password prompt.
-ansible_become: true
+# Escalation is a play keyword in playbook.yml, NOT ansible_become here.
+#
+# ansible_become is a magic connection variable, and a variable beats a task keyword - so with it
+# set, every `become: false` in the roles was silently ignored, including the ones on
+# delegate_to: localhost tasks (the implicit localhost is a member of `all`). redelkctl therefore
+# ran as root on the CONTROL NODE and left redelk.secrets.yml, build/ and certs/ owned by root in
+# the operator's own checkout, after which any unprivileged `./redelkctl validate` fails with a
+# permission error and every later deploy is wedged.
+#
+# Passwordless sudo on the targets is still required: the repository is copied with rsync, which
+# runs 'sudo rsync' on the far end and cannot answer a password prompt.
 
 # The RedELK repository on the control node: the directory holding redelk.yml and ./redelkctl.
 redelk_repo_path: "{{ playbook_dir | dirname }}"

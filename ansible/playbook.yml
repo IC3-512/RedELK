@@ -26,6 +26,8 @@
 - name: Deploy the RedELK server
   hosts: elkservers
   gather_facts: true
+  # A play keyword, so a task's own `become: false` can still override it.
+  become: true
   roles:
     - role: docker
       # Defined in group_vars/elkservers.yml; defaulted here so the playbook also works with an
@@ -40,6 +42,7 @@
 - name: Deploy the redirector and C2 server shippers
   hosts: c2servers:redirs
   gather_facts: true
+  become: true
   roles:
     - role: redelk-client
       tags:

@@ -576,3 +576,40 @@ def test_the_shared_redirector_filter_sorts_after_the_per_program_ones():
         f"{common.name} must sort after every per-program redirector filter "
         f"({per_program}), or the enrichment runs before the fields it reads exist."
     )
+
+
+# ------------------------------------------------------------------------------------------------
+# Escalation must be a play keyword, never ansible_become
+#
+# ansible_become is a magic connection VARIABLE, and a variable beats a task keyword. Setting it
+# made every `become: false` in the roles inert - including the delegate_to: localhost tasks, since
+# the implicit localhost belongs to `all`. redelkctl then ran as root on the operator's own control
+# node and left redelk.secrets.yml, build/ and certs/ root-owned, after which any unprivileged
+# `redelkctl validate` fails and every later deploy is wedged. A play keyword can be overridden.
+# ------------------------------------------------------------------------------------------------
+
+
+def test_escalation_is_a_play_keyword_not_a_variable():
+    for path in (REPO_ROOT / "ansible").rglob("*.yml"):
+        if ".ansible" in path.parts or "molecule" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "ansible_become:" not in text, (
+            f"{path.relative_to(REPO_ROOT)} sets ansible_become. That is a variable, so it "
+            "overrides every `become: false` in the roles - including the ones on "
+            "delegate_to: localhost - and redelkctl ends up running as root on the control node. "
+            "Use `become:` as a play keyword instead."
+        )
+
+
+def test_the_host_facing_plays_still_escalate():
+    """Removing the variable must not have removed escalation itself."""
+    playbook = yaml.safe_load((REPO_ROOT / "ansible/playbook.yml").read_text(encoding="utf-8"))
+    host_plays = [p for p in playbook if p.get("hosts") not in (None, "all")]
+
+    assert host_plays, "no host-facing plays found; this invariant needs rewriting"
+    for play in host_plays:
+        assert play.get("become") is True, (
+            f"play {play.get('name')!r} targets {play.get('hosts')!r} but does not escalate. "
+            "redelkctl writes root-owned files and install.py needs root on the shippers."
+        )
