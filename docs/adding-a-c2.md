@@ -79,7 +79,9 @@ Rules that are easy to get wrong:
 If the teamserver has artefacts to pull (screenshots, downloads), add the rsync lines to
 `tools/redelk_setup/templates/cron/client.j2` and, if you need a helper script, drop it in
 `c2servers/scripts/` and list it in `_sync_scripts_for()` in
-[`tools/redelk_setup/render.py`](../tools/redelk_setup/render.py).
+[`tools/redelk_setup/render.py`](../tools/redelk_setup/render.py). A script that touches the
+teamserver's own directories must not hard-code them: name it `*.j2`, use `{{ base_path }}`, and
+the renderer fills in that host's `paths.base` and drops the suffix.
 
 ## 3. Logstash filter (file-based only)
 

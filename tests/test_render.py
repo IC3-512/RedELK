@@ -29,6 +29,12 @@ from conftest import FULL_CONFIG, snapshot_tree
 
 PLACEHOLDER = re.compile(r"\{\{|\}\}|\{%")
 
+# Upstream's installation paths. Anything generated for a host must come from its paths.base, so
+# one of these turning up in a rendered file means the value was baked in rather than rendered.
+DEFAULT_BASE_PATHS = {
+    spec["default_base_path"] for spec in schema.C2_TYPES.values() if "default_base_path" in spec
+}
+
 
 @pytest.fixture
 def elkserver(fake_root):
@@ -558,15 +564,10 @@ def test_a_package_carries_only_its_own_c2_inputs(deployment, fake_root):
 def test_a_c2_input_does_not_mention_another_c2s_paths(deployment, fake_root):
     cfg = deployment()
     packages = fake_root / "build" / "packages"
-    other_paths = {
-        entry["default_base_path"]
-        for entry in schema.C2_TYPES.values()
-        if "default_base_path" in entry
-    }
 
     for c2 in cfg.c2_by_ingest("files"):
         text = (packages / c2.name / "inputs.d" / f"{c2.type}.yml").read_text(encoding="utf-8")
-        for base in other_paths - {c2.base_path}:
+        for base in DEFAULT_BASE_PATHS - {c2.base_path}:
             assert base not in text, f"{c2.name}'s input references {base}"
 
 
@@ -658,6 +659,55 @@ def test_only_the_c2s_own_sync_scripts_are_shipped(deployment, fake_root):
     assert not any((packages / "posh1" / "scripts").iterdir())
     stage1_scripts = {path.name for path in (packages / "stage1" / "scripts").iterdir()}
     assert stage1_scripts == {"copydownloads_outflankstage1.sh"}
+
+
+def test_the_sync_scripts_follow_the_configured_base_path(deployment, fake_root):
+    """These three used to ship verbatim with /root baked in.
+
+    On any layout but upstream's they exported nothing, so Cobalt Strike credentials and every
+    downloaded file stayed on the teamserver while cron reported success.
+    """
+    cfg = deployment(
+        {
+            "c2_servers": [
+                {
+                    "name": "cs1",
+                    "type": "cobaltstrike",
+                    "host": "198.51.100.20",
+                    "paths": {"base": "/opt/teamserver"},
+                },
+                {
+                    "name": "stage1",
+                    "type": "outflankstage1",
+                    "host": "198.51.100.23",
+                    "paths": {"base": "/srv/stage1"},
+                },
+            ]
+        }
+    )
+    packages = fake_root / "build" / "packages"
+
+    for c2 in cfg.c2_by_ingest("files"):
+        shipped = sorted((packages / c2.name / "scripts").glob("*.sh"))
+        assert shipped, f"{c2.name} ships no sync script to check"
+        for script in shipped:
+            text = script.read_text(encoding="utf-8")
+            assert not PLACEHOLDER.search(text), f"{script.name} kept a Jinja placeholder"
+            assert c2.base_path in text, f"{script.name} ignores paths.base"
+            for other in DEFAULT_BASE_PATHS:
+                assert other not in text, f"{script.name} still hard-codes {other}"
+
+
+def test_no_shipped_client_script_hard_codes_a_c2_base_path():
+    """The renderer can only parameterise what the source leaves parameterisable."""
+    from conftest import REPO_ROOT
+
+    for script in sorted((REPO_ROOT / "c2servers" / "scripts").iterdir()):
+        if not script.is_file():
+            continue
+        text = script.read_text(encoding="utf-8")
+        for base in DEFAULT_BASE_PATHS:
+            assert base not in text, f"{script.name} hard-codes {base}"
 
 
 def test_the_client_cron_matches_the_c2_type(deployment, fake_root):

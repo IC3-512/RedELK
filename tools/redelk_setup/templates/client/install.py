@@ -36,6 +36,9 @@ FILEBEAT_CERT_DIR = FILEBEAT_CONFIG_DIR / "certs"
 FILEBEAT_INPUTS_DIR = FILEBEAT_CONFIG_DIR / "inputs.d"
 REDELK_BIN_DIR = Path("/usr/share/redelk/bin")
 REDELK_LOG_DIR = Path("/var/log/redelk")
+# Both the generated cron file and rush.rc call rsync by this absolute path, so a copy sitting
+# anywhere else is of no use to either of them.
+RSYNC_PATH = "/usr/bin/rsync"
 KEYRING = Path("/etc/apt/keyrings/elastic.asc")
 ELASTIC_KEY_URL = "https://artifacts.elastic.co/GPG-KEY-elasticsearch"
 
@@ -254,14 +257,63 @@ def ensure_user(runner: Runner, username: str, shell: str) -> None:
     runner.run(["passwd", "--lock", username], check=False)
 
 
+def _ensure_binary(runner: Runner, binary: str, package: str, fallback: str, breaks: str) -> str:
+    """Install `package` unless `binary` is already there, and return where it landed.
+
+    Every failure here is silent on the C2 server itself - cron keeps firing, the RedELK server
+    keeps connecting, and no artefact ever moves - so a bare "command failed: apt-get install"
+    is not enough. Say which half of the sync is dead.
+    """
+    found = shutil.which(binary)
+    if found:
+        info(f"{binary} is already installed ({found})")
+        return found
+
+    info(f"Installing {package}")
+    runner.run(["apt-get", "install", "-y", package], check=False, quiet=True)
+    found = shutil.which(binary)
+    if found is None and not runner.dry_run:
+        raise InstallError(
+            f"'apt-get install {package}' did not provide {binary}. {breaks} Install {package} "
+            f"by hand and run this installer again."
+        )
+    return found or fallback
+
+
+def _ensure_rsync(runner: Runner, username: str) -> None:
+    """rsync moves the artefacts on both legs of the sync, and is not installed by default.
+
+    The cron file stages this host's logs into the ssh user's home with it, and the RedELK
+    server's pull re-executes it here through rush - which pins argv[0] to RSYNC_PATH.
+    """
+    path = _ensure_binary(
+        runner,
+        "rsync",
+        "rsync",
+        RSYNC_PATH,
+        f"rsync stages this host's artefacts into {username}'s home directory and serves the "
+        "RedELK server's pull; nothing at all is collected from this host without it.",
+    )
+    if path != RSYNC_PATH:
+        warn(
+            f"rsync is installed at {path}, but the cron file and /etc/rush.rc both call "
+            f"{RSYNC_PATH}. Symlink it there, or the sync will not run."
+        )
+
+
 def install_sync(runner: Runner, manifest: dict) -> None:
     """Everything needed for the RedELK server to pull artefacts off this C2 server."""
     username = manifest.get("ssh_user", "scponly")
 
-    info("Installing rush (restricted shell)")
-    if shutil.which("rush") is None:
-        runner.run(["apt-get", "install", "-y", "rush"], quiet=True)
-    rush_path = shutil.which("rush") or "/usr/sbin/rush"
+    rush_path = _ensure_binary(
+        runner,
+        "rush",
+        "rush",
+        "/usr/sbin/rush",
+        f"rush is the {username} user's login shell; without it the RedELK server's ssh key "
+        "cannot run anything on this host.",
+    )
+    _ensure_rsync(runner, username)
 
     rush_rc = Path("/etc/rush.rc")
     if rush_rc.is_file() and b"RedELK" not in rush_rc.read_bytes():

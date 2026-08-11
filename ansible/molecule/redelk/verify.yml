@@ -80,6 +80,9 @@
         - /etc/filebeat/certs/client.crt
         - /etc/filebeat/certs/client.key
         - /etc/rush.rc
+        # The cron file and rush.rc both spell this path out; without the binary the teamserver
+        # stages nothing and the server's pull has nothing to talk to.
+        - /usr/bin/rsync
       loop_control:
         label: "{{ item }}"
 

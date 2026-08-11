@@ -40,9 +40,9 @@ Useful flags:
    material in `/etc/filebeat/certs/`. Inputs left behind by an older RedELK install that this
    host no longer needs are removed.
 {% if manifest.sync %}
-3. Creates the `{{ manifest.ssh_user }}` user with `rush` as its shell, restricted to a
-   read-only `rsync`, and authorises the RedELK server's ssh key so it can pull screenshots,
-   downloads and keystroke files.
+3. Installs `rush` and `rsync`, creates the `{{ manifest.ssh_user }}` user with `rush` as its
+   shell, restricted to a read-only `rsync`, and authorises the RedELK server's ssh key so it can
+   pull screenshots, downloads and keystroke files.
 4. Installs `/etc/cron.d/redelk_{{ host.type }}`, which copies those artefacts into
    `{{ manifest.ssh_user }}`'s home directory once a minute.
 {% endif %}

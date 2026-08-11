@@ -276,11 +276,13 @@ The installer:
 2. Writes `/etc/filebeat/filebeat.yml`, `/etc/filebeat/inputs.d/` and `/etc/filebeat/certs/`,
    backing up a pre-existing `filebeat.yml` to `filebeat.yml.pre-redelk`. Inputs left over from an
    older RedELK install that this host no longer needs are removed.
-3. On a file-based C2 server: installs `rush`, creates the sync user (`scponly` by default) with
-   `rush` as its shell restricted to a read-only `rsync`, authorises the RedELK server's ssh key
-   without removing keys you added, and installs `/etc/cron.d/redelk_<type>` plus the helper
-   scripts in `/usr/share/redelk/bin/`. For Cobalt Strike it also installs `javaobj-py3`, which
-   `exportcsdata.py` needs to read the teamserver's data model.
+3. On a file-based C2 server: installs `rush` and `rsync` (the cron job stages artefacts with
+   `rsync` and the RedELK server's pull re-executes it on this end), creates the sync user
+   (`scponly` by default) with `rush` as its shell restricted to a read-only `rsync`, authorises
+   the RedELK server's ssh key without removing keys you added, and installs
+   `/etc/cron.d/redelk_<type>` plus the helper scripts in `/usr/share/redelk/bin/`. For Cobalt
+   Strike it also installs `javaobj-py3`, which `exportcsdata.py` needs to read the teamserver's
+   data model.
 4. Starts Filebeat and runs `filebeat test config` and `filebeat test output`.
 
 It is idempotent - run it again after regenerating the package (for example after rotating

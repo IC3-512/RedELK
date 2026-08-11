@@ -534,8 +534,20 @@ def render_client_package(cfg: config_module.Config, host, destination: Path) ->
         scripts_dir.mkdir(parents=True, exist_ok=True)
         for script in _sync_scripts_for(host.type):
             src = cfg.root / "c2servers" / "scripts" / script
-            if src.is_file():
+            if not src.is_file():
+                continue
+            if src.suffix != ".j2":
                 write_if_changed(scripts_dir / script, src.read_bytes(), mode=0o755)
+                continue
+            # A script that walks the teamserver's own directories gets paths.base rendered into
+            # it, exactly like the cron file next to it in the package. Shipping one verbatim
+            # baked in upstream's /root layout, and any other layout collected nothing while cron
+            # reported success. They stay in c2servers/scripts/ with the rest of the client
+            # scripts, which is under cfg.root rather than TEMPLATE_DIR - hence from_string.
+            rendered = env.from_string(src.read_text(encoding="utf-8")).render(
+                header=GENERATED_HEADER, host=host, base_path=host.base_path
+            )
+            write_if_changed(scripts_dir / src.stem, rendered, mode=0o755)
 
     # 5. The installer itself and its manifest.
     installer = (TEMPLATE_DIR / "client" / "install.py").read_text(encoding="utf-8")
@@ -550,13 +562,14 @@ def render_client_package(cfg: config_module.Config, host, destination: Path) ->
 
 
 def _sync_scripts_for(c2_type: str) -> list[str]:
+    """Filenames under c2servers/scripts/. A '.j2' suffix is rendered and stripped."""
     return {
         "cobaltstrike": [
-            "export_cobaltstrikedata.sh",
+            "export_cobaltstrikedata.sh.j2",
             "exportcsdata.py",
-            "copydownloads_cobaltstrike.sh",
+            "copydownloads_cobaltstrike.sh.j2",
         ],
-        "outflankstage1": ["copydownloads_outflankstage1.sh"],
+        "outflankstage1": ["copydownloads_outflankstage1.sh.j2"],
         "sliver": [],
         "poshc2": [],
     }.get(c2_type, [])
