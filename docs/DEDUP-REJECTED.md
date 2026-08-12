@@ -6,59 +6,58 @@ independently reviewed; one landed (the redirector filters, commit b91d652) and 
 They are recorded here because "we tried this and it was not safe" is worth more than the diff
 was, and because the obvious next attempt will hit the same walls.
 
-## c2api/util.py and enrich_outflankc2 helper fold — rejected
+Each of the three passed `pytest tests/` cleanly. That is the point: a green suite was what made
+them look ready, and in all three cases the behaviour difference lived somewhere the suite does
+not reach.
 
-Would have removed 110 lines. The suite passed (PASS. `/tmp/rvenv/bin/pytest tests/ -q` (the venv at the giv...), which is exactly why the suite was not the deciding evidence.
+## `c2api/util.py` and `enrich_outflankc2` helper fold — rejected
 
-**What the review found:**
+Would have removed 110 lines by folding the two modules' shared coercion helpers together.
 
-- BLOCKER — the patch depends on `util.to_iso`, which does not exist on this branch.
-
-- The risk list enumerates the callers of the changed helpers and misses a whole third consumer: `/home/max/gits/RedELK/elkserver/docker/redelk-base/redelkinstalldata/scripts/modules/c2api/cursor.py:27` imports both `coerce_int` and `parse_timestamp`, and uses them at cursor.py:65, :71, :73 and :82 — `Cursor.load()` feeds `parse_timestamp(source.get("last_poll"))` straight into `Cursor.due()`, which.
-
-- The `parse_timestamp` widening is not confined to `@timestamp` — it changes WHICH OC2 objects are ingested.
-
+- **Blocker:** the patch calls `util.to_iso`, which does not exist on this branch.
+- The risk assessment listed the callers of the changed helpers and missed a third consumer
+  entirely: `modules/c2api/cursor.py` imports both `coerce_int` and `parse_timestamp` and uses
+  them in `Cursor.load()`. That matters because `load()` feeds
+  `parse_timestamp(source.get("last_poll"))` straight into `Cursor.due()`, which returns `True`
+  whenever `last_poll` is `None`. Widening what `parse_timestamp` accepts therefore turns a
+  "poll now" into a "wait" for any stored value that previously failed to parse, silently
+  changing the polling schedule of every API-ingested C2.
+- The `parse_timestamp` widening is not confined to `@timestamp`. It changes which Outflank C2
+  objects are ingested at all.
 - The same widening flips task-completion state, emitting a document that did not exist before.
 
+## C2 filter common tail (files 50-53) — rejected
 
-## C2 filter common tail (50-53) — rejected
+Would have removed 186 lines by hoisting the shared tail of the four per-C2 Logstash filters.
 
-Would have removed 186 lines. The suite passed (500 passed, 1 skipped, 34 deselected, 9 warnings in 6.40s (`...), which is exactly why the suite was not the deciding evidence.
-
-**What the review found:**
-
-- GATE SCOPE CHANGE IS REAL AND DEMONSTRABLE (elkserver/mounts/logstash-config/redelk-main/conf.d/59-filter-c2-common_logstash.conf:21).
-
-- THE STATED JUSTIFICATION FOR THE copy->add_field NORMALISATION IS FACTUALLY WRONG (59-filter-c2-common_logstash.conf:29-30).
-
-- DOUBLED dns/geoip LOOKUPS AND A NEW rtops-vs-implantsdb DIVERGENCE WINDOW (59-filter-c2-common_logstash.conf:28-59).
-
-- TAGS ARRAY ORDER CHANGED ON EVERY ENRICHED DOCUMENT (undisclosed).
-
+- The conditional guarding the hoisted block has a different scope than the four it replaces
+  (`elkserver/mounts/logstash-config/redelk-main/conf.d/59-filter-c2-common_logstash.conf:21`),
+  which is demonstrable rather than theoretical.
+- The justification given for normalising `copy` into `add_field` is factually wrong
+  (`59-filter-c2-common_logstash.conf:29-30`).
+- The result performs the `dns` and `geoip` lookups twice, and opens a window in which `rtops-*`
+  and `implantsdb` disagree (`59-filter-c2-common_logstash.conf:28-59`).
+- The order of the `tags` array changes on every enriched document. This was not disclosed in
+  the patch's own risk list.
 
 ## Cobalt Strike ruby log-path scripts — rejected
 
-Would have removed 36 lines. The suite passed (/tmp/rvenv/bin/pytest tests/ -q from the repo root: 500 pass...), which is exactly why the suite was not the deciding evidence.
+Would have removed 36 lines shared between the two log-path scripts.
 
-**What the review found:**
-
-- BEHAVIOUR CHANGE (reproduced, narrow reachability) - tag set differs on the exception path.
-
-- CI-COVERAGE REGRESSION, disclosed but understated.
-
-- AUTHOR'S RISK STATEMENT IS WRONG on the malformed-reference case.
-
-- DOC NIT, no runtime effect.
-
+- Behaviour change on the exception path: the tag set differs. Reproduced, though the
+  reachability is narrow.
+- A CI coverage regression, disclosed but understated.
+- The author's risk statement is wrong about the malformed-reference case.
+- One documentation error with no runtime effect.
 
 ## The pattern worth remembering
 
-All three failures share a shape: the change is mechanically correct, the unit suite is green, and
-the behaviour difference lives somewhere the suite does not reach — a Logstash conditional's scope,
-a helper's edge case on an input the tests never pass, an exception path.
+All three share a shape: the change is mechanically correct, the unit suite is green, and the
+behaviour difference lives somewhere the suite does not reach — a Logstash conditional's scope, a
+helper's edge case on an input no test passes, an exception path.
 
 The redirector dedup was safe for a reason that is not luck: the three blocks were byte-identical,
-so equivalence could be *proved* rather than argued. That is the bar. When the blocks differ at all,
-the fold needs a shim, and a shim is a behaviour change wearing a refactor's clothes.
+so equivalence could be *proved* rather than argued. That is the bar. When the blocks differ at
+all, the fold needs a shim, and a shim is a behaviour change wearing a refactor's clothes.
 
 Anyone retrying these should start by proving byte-equality, and stop if it does not hold.
