@@ -493,7 +493,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("logs", help="show container logs")
     p.add_argument("service", nargs="*")
     p.add_argument("-f", "--follow", action="store_true")
-    p.add_argument("--tail", default=100)
+    # 100 lines is one connector poll cycle. The default has to be enough to still contain
+    # container startup after the stack has been running for a while, which is exactly when
+    # somebody reaches for this command.
+    p.add_argument("--tail", default=2000)
     p.set_defaults(func=cmd_logs)
 
     p = sub.add_parser("status", help="show container status")

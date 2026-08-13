@@ -24,10 +24,12 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import warnings
 from typing import Any, Iterable
 from urllib.parse import urljoin, urlsplit
 
 import requests
+import urllib3
 from modules.c2api.util import FILE_MODE
 
 # Fallback only: callers pass modules.helpers.HTTP_TIMEOUT. Importing helpers here would pull
@@ -70,6 +72,16 @@ class ApiClient:
                 "TLS verification is disabled for %s (verify_tls: false in redelk.yml)",
                 self.base_url,
             )
+            # "once", not disable_warnings(). enrich_outflankc2/client.py argued against silencing
+            # this globally - hiding a disabled certificate check is worse than a noisy log - and
+            # that is right. But urllib3 raises it on EVERY request and warnings.warn prints two
+            # lines each time, so a 15-second poll of a C2 API buries everything else: a real
+            # deploy failure was diagnosed from `logs base --tail 100` that contained nothing but
+            # this warning, the provisioning output having scrolled away hours earlier.
+            #
+            # "once" keeps the first occurrence - so the warning is still in the log, on its own
+            # merits, alongside the explicit line above - and drops the repeats.
+            warnings.filterwarnings("once", category=urllib3.exceptions.InsecureRequestWarning)
 
     def set_headers(self, headers: dict[str, str]) -> None:
         """Install (or replace) the authentication headers used for every later request."""

@@ -40,6 +40,8 @@ import re
 from typing import Any
 
 import requests
+import urllib3
+import warnings
 
 # Same value as modules.helpers.HTTP_TIMEOUT. It is repeated instead of imported because helpers
 # builds an Elasticsearch client at import time, and this file has to stay usable without one.
@@ -122,6 +124,11 @@ class OutflankC2Client:
                 "TLS verification is disabled for Outflank C2 at %s (verify_tls: false)",
                 self.base_url,
             )
+            # The noisy log turned out to have a cost that paragraph did not anticipate: urllib3
+            # raises this per request, two printed lines each, and a polling connector drowns the
+            # container's own startup output in it. "once" keeps the warning without the flood -
+            # it is still there, just not 40 times a minute.
+            warnings.filterwarnings("once", category=urllib3.exceptions.InsecureRequestWarning)
         self.authenticated = False
 
     # ----------------------------------------------------------------------------------------
