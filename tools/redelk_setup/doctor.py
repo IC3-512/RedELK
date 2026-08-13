@@ -313,8 +313,14 @@ def _check_ports(cfg: config_module.Config, report: Report) -> None:
 
 
 def wait_for_stack(cfg: config_module.Config, *, timeout: int = 600) -> bool:
-    """Poll until Elasticsearch and Kibana are usable, printing progress."""
-    deadline = time.time() + timeout
+    """Poll until Elasticsearch and Kibana are usable, printing progress.
+
+    `timeout` is per stage, not for all of them together. It used to be one deadline computed
+    once and shared: Elasticsearch and Kibana spent whatever they needed out of it and the
+    dashboards stage inherited the remainder. On a 2-vCPU node where Kibana alone took 100
+    seconds that left the last - and slowest - stage short, so the install reported "timed out"
+    on a stack that `doctor` then declared healthy.
+    """
     stages = [
         ("Elasticsearch", _es_ready),
         ("Kibana", _kibana_ready),
@@ -326,6 +332,7 @@ def wait_for_stack(cfg: config_module.Config, *, timeout: int = 600) -> bool:
     ]
 
     for label, probe in stages:
+        deadline = time.time() + timeout
         print(f"  waiting for {label} ", end="", flush=True)
         while time.time() < deadline:
             ok, detail = probe(cfg)
@@ -336,7 +343,13 @@ def wait_for_stack(cfg: config_module.Config, *, timeout: int = 600) -> bool:
             time.sleep(5)
         else:
             print(f"{RED}timed out{RESET}")
-            print(f"    check the logs: ./redelkctl logs {label.lower()}")
+            # The old hint was `./redelkctl logs {label.lower()}`, which for this stage expanded
+            # to `logs redelk dashboards` - two compose service names, neither of which exists.
+            # `logs` passes its arguments to `docker compose logs`, so it wants the SERVICE name
+            # (`base`), not the container name (`redelk-base`). Every stage here is waiting on
+            # something that container does, so that is the log worth reading either way.
+            print(f"    {label} did not become ready within {timeout}s")
+            print("    check the logs: ./redelkctl logs base")
             return False
     return True
 
