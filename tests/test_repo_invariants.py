@@ -636,3 +636,25 @@ def test_the_operator_role_can_resolve_esql_views():
     assert '"manage"' not in operator, (
         "manage would fix the 500 and also let an analyst delete the indices"
     )
+
+
+def test_the_operator_role_can_create_the_index_it_writes_to():
+    """RedELK writes to date-stamped indices, so the first write of each day creates one.
+
+    `write` covers indexing a document and not bringing the index into existence, so without
+    this the operator command log fails its first session after midnight with
+    "action [indices:admin/auto_create] is unauthorized for user [redelk]".
+
+    auto_configure rather than create_index: checked against a real 9.5.0, both let the bulk
+    through (403 with neither, 201 with either), and auto_configure is exactly "may auto-create
+    and update mappings" without also granting deliberate index creation.
+    """
+    source = (DAEMON_SCRIPTS_DIR / "bootstrap.py").read_text()
+    operator = source.split('"redelk_operator": {')[1].split('"applications"')[0]
+
+    assert '"auto_configure"' in operator, (
+        "the operator account cannot create the dated index it writes to"
+    )
+    assert '"create_index"' not in operator, (
+        "auto_configure is the narrower grant and is sufficient"
+    )

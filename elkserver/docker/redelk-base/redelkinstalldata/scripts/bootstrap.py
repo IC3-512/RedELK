@@ -217,6 +217,17 @@ def create_roles(session: requests.Session) -> None:
                         # and reconfiguring every index the role can see, which is not something
                         # to hand an analyst account to fix a read path.
                         "indices:admin/esql/view/*",
+                        # `write` covers indexing a document but not bringing the index into
+                        # existence, and RedELK writes to date-stamped indices - so the first
+                        # write of each day is to an index that does not exist yet and fails
+                        # with "action [indices:admin/auto_create] is unauthorized". The
+                        # operator command log hits this on its first session after midnight.
+                        #
+                        # auto_configure, not create_index: both let the bulk through (checked
+                        # against 9.5.0 - 403 without either, 201 with either), and this one is
+                        # exactly "may auto-create and update mappings" without also granting
+                        # deliberate index creation.
+                        "auto_configure",
                     ],
                 }
             ],
