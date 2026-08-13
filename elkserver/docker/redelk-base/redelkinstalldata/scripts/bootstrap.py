@@ -197,7 +197,27 @@ def create_roles(session: requests.Session) -> None:
             "indices": [
                 {
                     "names": REDELK_INDICES,
-                    "privileges": ["read", "write", "view_index_metadata", "maintenance"],
+                    "privileges": [
+                        "read",
+                        "write",
+                        "view_index_metadata",
+                        "maintenance",
+                        # Kibana resolves ES|QL views while working out a data view's time field,
+                        # which happens on Discover and on every dashboard load. Without this the
+                        # operator's own UI answers 500, with
+                        # "action [indices:admin/esql/view/get] is unauthorized for user [redelk]"
+                        # in the Kibana log - so the account RedELK exists to be used from cannot
+                        # use it.
+                        #
+                        # Granted as the action rather than a named privilege because 9.5 has no
+                        # index privilege that covers it: `GET _security/privilege/_builtin` lists
+                        # 32 index privileges and none mentions esql, the only esql entry being the
+                        # CLUSTER privilege monitor_esql - which was tested against a real 9.5.0
+                        # and still returns 403. `manage` does grant it, and also grants deleting
+                        # and reconfiguring every index the role can see, which is not something
+                        # to hand an analyst account to fix a read path.
+                        "indices:admin/esql/view/*",
+                    ],
                 }
             ],
             "applications": [

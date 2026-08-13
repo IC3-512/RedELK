@@ -613,3 +613,26 @@ def test_the_host_facing_plays_still_escalate():
             f"play {play.get('name')!r} targets {play.get('hosts')!r} but does not escalate. "
             "redelkctl writes root-owned files and install.py needs root on the shippers."
         )
+
+
+def test_the_operator_role_can_resolve_esql_views():
+    """Kibana resolves ES|QL views while working out a data view's time field.
+
+    Without the privilege the operator's own UI answers 500 on Discover and on dashboard loads,
+    with "action [indices:admin/esql/view/get] is unauthorized for user [redelk]" in the Kibana
+    log - so the account RedELK exists to be used from cannot use it.
+
+    Checked against a real 9.5.0: no index privilege covers this (32 built-ins, none mention
+    esql), the cluster privilege monitor_esql does NOT grant it, and `manage` does - along with
+    deleting and reconfiguring every index the role can see, which is why the action is granted
+    directly instead.
+    """
+    source = (DAEMON_SCRIPTS_DIR / "bootstrap.py").read_text()
+    operator = source.split('"redelk_operator": {')[1].split('"applications"')[0]
+
+    assert "indices:admin/esql/view/*" in operator, (
+        "the operator account cannot resolve ES|QL views, so Kibana 500s on every dashboard"
+    )
+    assert '"manage"' not in operator, (
+        "manage would fix the 500 and also let an analyst delete the indices"
+    )
