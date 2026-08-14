@@ -82,3 +82,48 @@ def test_stage1_matches_what_cobaltstrike_already_did():
     cs_limits = {int(v) for v in re.findall(r"max_lines:\s*(\d+)", cs)}
     stage1_limits = {int(v) for v in re.findall(r"max_lines:\s*(\d+)", stage1)}
     assert stage1_limits and stage1_limits <= cs_limits
+
+
+def test_a_failed_download_does_not_become_a_download_record():
+    """`Downloaded [Error 3] ...` matched the old test, so a download that never happened produced
+    a downloads document that then failed its own grok - no path, no size, no local id to find."""
+    source = STAGE1_FILTER.read_text(encoding="utf-8")
+    assert r"Downloaded [^\[]/" in source, "the clone still fires on a failed download"
+
+
+def test_the_star_separator_is_optional():
+    """Stage1 does not write "*** " on every line - "UTC Unknown download for task X" has none -
+    and requiring it turned a partial parse into no parse at all."""
+    source = STAGE1_FILTER.read_text(encoding="utf-8")
+    assert r"UTC (\*\*\* )?" in source
+
+
+def test_host_os_type_is_mapped_as_a_keyword():
+    """The filter derives host.os.type, and an unmapped field lands in a dynamic text field:
+    Kibana cannot aggregate on it ("Fielddata is disabled on [host.os.type]"), so the value is
+    there but no dashboard can group by it. ECS defines it, the template just never listed it."""
+    import json
+
+    template = json.loads(
+        (
+            REPO_ROOT
+            / "elkserver/docker/redelk-base/redelkinstalldata/templates/component/redelk-ecs-base.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    def find_host_os(node, parent=""):
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict) and "os" in props and parent == "host":
+                return props["os"]["properties"]
+            for key, value in node.items():
+                hit = find_host_os(
+                    value, key if key not in ("properties", "mappings", "template") else parent
+                )
+                if hit is not None:
+                    return hit
+        return None
+
+    host_os = find_host_os(template)
+    assert host_os is not None, "host.os is not in the ECS component template at all"
+    assert host_os.get("type", {}).get("type") == "keyword"

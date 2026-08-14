@@ -399,6 +399,10 @@
                   "type": "keyword",
                   "ignore_above": 1024
                 },
+                "type": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                },
                 "version": {
                   "type": "keyword",
                   "ignore_above": 1024
