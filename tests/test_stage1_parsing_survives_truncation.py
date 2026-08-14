@@ -127,3 +127,28 @@ def test_host_os_type_is_mapped_as_a_keyword():
     host_os = find_host_os(template)
     assert host_os is not None, "host.os is not in the ECS component template at all"
     assert host_os.get("type", {}).get("type") == "keyword"
+
+
+def test_an_argument_containing_a_semicolon_does_not_erase_the_command():
+    """rtops is the record of what an operator did, and a semicolon used to remove a line from it.
+
+    Stage1's format is "key:value; " delimited with no escaping, and every field was captured with
+    [^;]*. An argument containing a semicolon ended the capture early, the rest of the line then
+    matched nothing, and the whole grok failed - so the document arrived with no implant.task, no
+    task_id and no operator. Confirmed on a live engagement: `ls C:\\a;b;c` was simply not in the
+    audit record.
+
+    No malice needed - Windows command lines and PATH-like arguments contain semicolons routinely -
+    but malice is available: anyone who wants a command left out of the record only has to include
+    one. Anchoring each capture on the key that follows it keeps the argument whole.
+    """
+    pattern = taskresponse_pattern()
+    argument = pattern.split("taskRequestparameters")[1].split("taskResponse")[0]
+    assert "[^;]*" not in argument, "the argument capture stops at the first semicolon again"
+    assert "[\\s\\S]*?" in argument, "it should run to the key that follows it, lazily"
+
+
+def test_the_argument_capture_is_anchored_on_the_next_key():
+    """Lazy matching alone is not enough; it has to stop at something. `; taskResponse:` is the
+    only reliable terminator, since the argument itself may contain anything."""
+    assert "; taskResponse" in taskresponse_pattern()
