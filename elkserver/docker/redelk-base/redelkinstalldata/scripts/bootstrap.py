@@ -50,6 +50,17 @@ TIMEOUT = 30
 WAIT_INTERVAL = 5
 WAIT_TIMEOUT = int(os.environ.get("REDELK_WAIT_TIMEOUT", "900"))
 
+# Kibana answers 503 for a while after it calls itself available: `overall.level` flips before the
+# `licensing` plugin has fetched the license, and the security plugin cannot authenticate anything
+# until it has. On a real deployment that window was 4.8 seconds wide and the first import request
+# landed 33 milliseconds inside it - which ended provisioning permanently and left `redelkctl
+# install` polling 600 seconds for an import that had already given up. The import itself takes
+# 7.6 seconds, so nothing here was ever slow; it was a race, which is why it never correlated
+# with the CPU the node was given.
+TRANSIENT_STATUS = (502, 503, 504)
+RETRY_TIMEOUT = 120
+RETRY_INTERVAL = 5
+
 # Indices RedELK writes. The ingest role is scoped to exactly these - the previous role also
 # granted access to auditbeat*, packetbeat*, apm* and friends that RedELK never uses.
 REDELK_INDICES = [
@@ -95,23 +106,39 @@ def request(
     description: str = "",
     **kwargs: Any,
 ) -> requests.Response:
-    """Make a request and fail loudly on an unexpected HTTP status."""
+    """Make a request and fail loudly on an unexpected HTTP status.
+
+    A 502/503/504 is retried instead of raised. It does not mean "this request is wrong", it means
+    the service is up but something it depends on is not ready yet, which during provisioning is a
+    matter of seconds - and treating it as fatal is what turned a transient Kibana licensing gap
+    into a deployment with no dashboards at all.
+
+    Because of that, any body passed in `files` or `data` has to be replayable: bytes, not an open
+    file handle, which a retry would resend as an empty body.
+    """
     kwargs.setdefault("timeout", TIMEOUT)
-    response = session.request(method, url, **kwargs)
-    if response.status_code not in expect:
-        raise ProvisioningError(
-            f"{description or method + ' ' + url} failed: HTTP {response.status_code} "
-            f"{response.text[:500]}"
-        )
-    return response
+    label = description or f"{method} {url}"
+    deadline = time.time() + RETRY_TIMEOUT
+    while True:
+        response = session.request(method, url, **kwargs)
+        if response.status_code in expect:
+            return response
+        if response.status_code not in TRANSIENT_STATUS or time.time() >= deadline:
+            raise ProvisioningError(
+                f"{label} failed: HTTP {response.status_code} {response.text[:500]}"
+            )
+        logger.info("%s: HTTP %s, retrying in %ss", label, response.status_code, RETRY_INTERVAL)
+        time.sleep(RETRY_INTERVAL)
 
 
-def wait_for(session: requests.Session, url: str, label: str, check) -> None:
+def wait_for(
+    session: requests.Session, url: str, label: str, check, headers: dict | None = None
+) -> None:
     deadline = time.time() + WAIT_TIMEOUT
     last_error = ""
     while time.time() < deadline:
         try:
-            response = session.get(url, timeout=10)
+            response = session.get(url, timeout=10, headers=headers)
             if check(response):
                 logger.info("%s is up", label)
                 return
@@ -339,19 +366,25 @@ def provision_kibana(session: requests.Session) -> None:
         )
         return
 
-    wait_for(
-        session,
-        f"{KIBANA_URL}/api/status",
-        "Kibana",
-        lambda response: (
-            response.status_code == 200
-            and response.json().get("status", {}).get("overall", {}).get("level") == "available"
-        ),
-    )
-
     # Kibana 9 gates several of these routes behind the internal-origin header; without it
     # /api/kibana/settings answers "exists but is not available with the current configuration".
     headers = {"kbn-xsrf": "true", "x-elastic-internal-origin": "Kibana"}
+
+    # Deliberately not /api/status. That route is unauthenticated and reports `overall: available`
+    # while `plugins.licensing` is still starting, so it proves neither that the credentials work
+    # nor that a saved-objects call will be answered - and waiting on it opened the gate 33
+    # milliseconds before the first import was refused with a 503.
+    #
+    # Polling the API this function is about to use is readiness by definition rather than by
+    # proxy: a 200 here means authentication, the license and the saved-objects service are all
+    # live, whichever of them happens to be slowest today.
+    wait_for(
+        session,
+        f"{KIBANA_URL}/api/saved_objects/_find?type=dashboard&per_page=1",
+        "Kibana",
+        lambda response: response.status_code == 200,
+        headers=headers,
+    )
 
     # Data views must exist before the searches and dashboards that reference them, which is why
     # the files carry a numeric prefix (redelk_kibana_01_dataviews.ndjson, 02_searches, ...).
@@ -361,16 +394,18 @@ def provision_kibana(session: requests.Session) -> None:
         if path.stat().st_size == 0:
             logger.warning("skipping empty saved-object file %s", path.name)
             continue
-        with path.open("rb") as handle:
-            response = request(
-                session,
-                "POST",
-                f"{KIBANA_URL}/api/saved_objects/_import",
-                params={"overwrite": "true"},
-                headers=headers,
-                files={"file": (path.name, handle, "application/ndjson")},
-                description=f"importing {path.name}",
-            )
+        # Read the bytes rather than handing `request` an open handle: it retries a 503, and a
+        # retry would resend a handle that the first attempt already consumed - an empty import
+        # that reports success and silently installs nothing.
+        response = request(
+            session,
+            "POST",
+            f"{KIBANA_URL}/api/saved_objects/_import",
+            params={"overwrite": "true"},
+            headers=headers,
+            files={"file": (path.name, path.read_bytes(), "application/ndjson")},
+            description=f"importing {path.name}",
+        )
         document = response.json()
         if not document.get("success"):
             errors = json.dumps(document.get("errors", []))[:1000]

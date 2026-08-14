@@ -333,6 +333,7 @@ def wait_for_stack(cfg: config_module.Config, *, timeout: int = 600) -> bool:
 
     for label, probe in stages:
         deadline = time.time() + timeout
+        detail = ""
         print(f"  waiting for {label} ", end="", flush=True)
         while time.time() < deadline:
             ok, detail = probe(cfg)
@@ -349,6 +350,12 @@ def wait_for_stack(cfg: config_module.Config, *, timeout: int = 600) -> bool:
             # (`base`), not the container name (`redelk-base`). Every stage here is waiting on
             # something that container does, so that is the log worth reading either way.
             print(f"    {label} did not become ready within {timeout}s")
+            # Without this the operator has a row of dots and nothing else. The last probe result
+            # distinguishes the three failures that look identical from the outside; "0 imported"
+            # in particular means Kibana is answering fine and provisioning gave up, which no
+            # amount of further waiting will fix.
+            if detail:
+                print(f"    last check said: {detail}")
             print("    check the logs: ./redelkctl logs base")
             return False
     return True
@@ -378,14 +385,19 @@ def _dashboards_ready(cfg: config_module.Config) -> tuple[bool, str]:
             timeout=10,
             headers={"kbn-xsrf": "true", "x-elastic-internal-origin": "Kibana"},
         )
-    except (urllib.error.URLError, ConnectionError, socket.timeout, ssl.SSLError, OSError):
-        return False, ""
+    except (urllib.error.URLError, ConnectionError, socket.timeout, ssl.SSLError, OSError) as error:
+        return False, f"no answer ({type(error).__name__})"
     if status != 200:
-        return False, ""
+        # Not the same thing as "not imported yet", and the difference is the entire diagnosis:
+        # 503 is Kibana still starting a plugin, 401 is an elastic_password that does not match
+        # the running cluster, 200 with 0 total is a provisioning run that failed and will not
+        # retry itself. This returned "" for all of them, so a 600-second wait ended knowing
+        # exactly as much as it started with - which is why "slow or stuck?" stayed open so long.
+        return False, f"HTTP {status}"
     try:
         total = int(json.loads(body).get("total", 0))
     except (json.JSONDecodeError, ValueError, TypeError):
-        return False, ""
+        return False, "unparseable response"
     return total > 0, f"{total} imported"
 
 

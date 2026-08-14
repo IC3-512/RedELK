@@ -37,11 +37,11 @@ import hashlib
 import logging
 import os
 import re
+import warnings
 from typing import Any
 
 import requests
 import urllib3
-import warnings
 
 # Same value as modules.helpers.HTTP_TIMEOUT. It is repeated instead of imported because helpers
 # builds an Elasticsearch client at import time, and this file has to stay usable without one.
