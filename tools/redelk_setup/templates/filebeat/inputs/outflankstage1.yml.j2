@@ -20,6 +20,14 @@
         pattern: '^\d\d\d\d\-\d\d\-\d\d\s\d\d:\d\d:\d\d\sUTC\s'
         negate: true
         match: after
+        # Filebeat's default is 500 lines, and this input never set it - the Cobalt Strike input
+        # always did. A task whose output runs past 500 lines was therefore cut mid-output, which
+        # took the terminating ';' with it and made the Logstash grok backtrack over the whole
+        # truncated body hunting for one: the event came out tagged _groktimeout with implant.task,
+        # task_id, operator and output all missing. Seen on `ls C:\Windows\System32` and on `psx`,
+        # so the two commands most likely to produce something worth reading were exactly the two
+        # that arrived empty.
+        max_lines: 100000
   fields_under_root: true
   fields:
     infra:
