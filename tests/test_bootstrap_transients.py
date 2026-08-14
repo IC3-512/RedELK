@@ -171,3 +171,50 @@ def test_the_dashboard_probe_distinguishes_its_failures(monkeypatch):
     ok, detail = doctor._dashboards_ready(cfg)
     assert not ok
     assert detail == "0 imported", "Kibana answering with nothing imported is its own failure"
+
+
+def test_the_indices_the_daemon_writes_to_are_created_by_provisioning(monkeypatch):
+    """Whoever creates an index decides its mapping, and the daemon creating it loses the argument.
+
+    es.index() creates a missing index from the first document it sees. On a live deployment
+    redelk-modules was created at 12:06:47, before provisioning reached the templates, so
+    module.name came out as `text` - and the nine Health dashboard panels that aggregate on it
+    answered "Fielddata is disabled on [module.name]" instead of rendering. The dashboard an
+    operator opens to check their stack is healthy was the one that was not.
+    """
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+
+    class Head:
+        status_code = 404
+
+    created = []
+
+    class Session(FakeSession):
+        def head(self, url, **kwargs):
+            return Head()
+
+    def respond(method, url, kwargs):
+        if method == "PUT":
+            created.append(url.rsplit("/", 1)[-1])
+        return FakeResponse(200)
+
+    bootstrap.create_managed_indices(Session(respond))
+
+    assert "redelk-modules" in created
+
+
+def test_an_index_that_already_exists_is_left_alone(monkeypatch):
+    """Provisioning runs on every container start; recreating an index would be a data loss bug."""
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+
+    class Head:
+        status_code = 200
+
+    class Session(FakeSession):
+        def head(self, url, **kwargs):
+            return Head()
+
+    session = Session(lambda method, url, kwargs: FakeResponse(200))
+    bootstrap.create_managed_indices(session)
+
+    assert not session.calls, "an existing index must not be touched"

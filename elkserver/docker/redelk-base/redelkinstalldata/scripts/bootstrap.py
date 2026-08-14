@@ -63,6 +63,11 @@ RETRY_INTERVAL = 5
 
 # Indices RedELK writes. The ingest role is scoped to exactly these - the previous role also
 # granted access to auditbeat*, packetbeat*, apm* and friends that RedELK never uses.
+# Indices the daemon writes to by name rather than through Logstash, so nothing else guarantees
+# they exist before the first document arrives. create_managed_indices() makes them, which is the
+# only way their index template gets a say in the mapping - see the note there.
+MANAGED_INDICES = ["redelk-modules"]
+
 REDELK_INDICES = [
     "rtops-*",
     "redirtraffic-*",
@@ -172,6 +177,7 @@ def provision_elasticsearch(session: requests.Session) -> None:
     create_users(session)
     install_ilm_policy(session)
     install_templates(session)
+    create_managed_indices(session)
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     ES_MARKER.write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), encoding="utf-8")
@@ -313,6 +319,41 @@ def install_ilm_policy(session: requests.Session) -> None:
         description="installing the redelk ILM policy",
     )
     logger.info("ILM policy installed")
+
+
+def create_managed_indices(session: requests.Session) -> None:
+    """Create the indices the daemon writes to, so their template decides the mapping.
+
+    es.index() creates a missing index on the spot, with whatever mapping Elasticsearch infers from
+    the first document - and a field's mapping is fixed at creation. So the first of two things to
+    happen decides it: this function, or the daemon's first write.
+
+    Losing that race is silent and permanent. Measured on a live deployment, redelk-modules was
+    created at 12:06:47, before provisioning ever reached the templates, so module.name and
+    module.type were inferred as `text`. Nine panels of the Health dashboard aggregate on those
+    fields, and every one answered
+
+        Fielddata is disabled on [module.name] in [redelk-modules]
+
+    instead of rendering - the dashboard an operator opens to find out whether their stack is
+    working was the one dashboard that did not work. Installing the template afterwards fixes
+    nothing, because a template is only consulted when an index is created.
+
+    Creating the index here is idempotent: 400 resource_already_exists_exception is the expected
+    answer on every start after the first.
+    """
+    for index in MANAGED_INDICES:
+        response = session.head(f"{ES_URL}/{index}", timeout=TIMEOUT)
+        if response.status_code == 200:
+            continue
+        request(
+            session,
+            "PUT",
+            f"{ES_URL}/{index}",
+            expect=(200, 400),
+            description=f"creating index {index}",
+        )
+        logger.info("index %s created from its template", index)
 
 
 def install_templates(session: requests.Session) -> None:
