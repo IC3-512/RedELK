@@ -73,10 +73,63 @@ TIMESTAMP_FIELDS = ("timestamp", "created", "created_at", "time", "date")
 # credentials because they are all "something an implant produced".
 IMPLANT_REF_FIELDS = ("implant_uid", "implant_id", "stage1_uid", "uid_implant")
 
-# MITRE ATT&CK technique identifiers on a task. OC2 tags tasks with techniques but the field name
-# is not confirmed, hence a list; the inline <T1234> / [T1234] markers in the command text are
-# used as a fallback, which is exactly what RedELK already does for Cobalt Strike.
+# MITRE ATT&CK technique identifiers on a task. The field name was never confirmed, hence a list -
+# and it is now clear why nothing ever matched: OC2 does not record techniques under any name. Its
+# task table has fifteen columns (uid, implant_uid, name, out_name, arguments, run_arguments,
+# out_arguments, binary_content, binary_content_name, response, response_timestamp,
+# response_bytes_total, state, timestamp, operator) and no column in any of its three databases
+# matches technique|mitre|attack|ttp. The list is kept in case a later version adds one.
 TASK_TTP_FIELDS = ("ttps", "attack", "mitre", "techniques", "attack_ids")
+
+# So the task name is the only signal, exactly as for the file based path. This mirrors the table
+# in logstash-config/redelk-main/scripts/outflankstage1_task_to_ttp.rb, which cannot be shared
+# because the two run in different containers and different languages; a test asserts the two agree
+# so they cannot drift apart in a merge. The reasoning for what is and is not mapped lives in the
+# Ruby file - in short, tasks with no ATT&CK meaning are left untagged rather than guessed at.
+TASK_NAME_TECHNIQUES = {
+    "ls": ["T1083"],
+    "drives": ["T1082"],
+    "env": ["T1082"],
+    "uptime": ["T1082"],
+    "dnsname": ["T1016"],
+    "domainname": ["T1016"],
+    "ip": ["T1016"],
+    "ps": ["T1057"],
+    "psgrep": ["T1057"],
+    "psx": ["T1057"],
+    "psxx": ["T1057"],
+    "whoami": ["T1033"],
+    "list_apps": ["T1518"],
+    "list_entitlements": ["T1518"],
+    "check_tcc": ["T1518.001"],
+    "cat": ["T1005"],
+    "screenshot": ["T1113"],
+    "download": ["T1005", "T1041"],
+    "upload": ["T1105"],
+    "exec_command": ["T1059"],
+    "exec_process": ["T1106"],
+    "exec_dotnet": ["T1620"],
+    "exec_bof": ["T1620"],
+    "exec_bof_async": ["T1620"],
+    "exec_shellcode": ["T1055"],
+    "exec_jxa": ["T1059.002"],
+    "load_library": ["T1129"],
+    "getsystem": ["T1134.001"],
+    "steal_token": ["T1134.001"],
+    "make_token": ["T1134.003"],
+    "spawnas": ["T1134.002"],
+    "rev2self": ["T1134"],
+    "timestomp": ["T1070.006"],
+    "rm": ["T1070.004"],
+    "rmdir": ["T1070.004"],
+    "reg": ["T1012", "T1112"],
+    "socks": ["T1090"],
+    "portforward": ["T1090"],
+    "rportforward": ["T1090"],
+    "link": ["T1090.001"],
+    "unlink": ["T1090.001"],
+    "burn": ["T1008"],
+}
 
 TASK_ID_FIELDS = ("uid", "task_uid", "id", "task_id")
 TASK_COMMAND_FIELDS = ("task", "command", "request", "task_request", "cmd", "name")
@@ -329,12 +382,22 @@ def extract_technique_ids(task: dict, *extra_text: str) -> list[str]:
     if ids:
         return ids
 
-    haystack = [as_text(first_value(task, TASK_COMMAND_FIELDS, ""))]
+    command = as_text(first_value(task, TASK_COMMAND_FIELDS, ""))
+    haystack = [command]
     haystack.append(as_text(first_value(task, TASK_ARGUMENT_FIELDS, "")))
     haystack.extend(extra_text)
     for text in haystack:
         for marker in INLINE_TTP.findall(text or ""):
             add(marker)
+    if ids:
+        return ids
+
+    # Last, because it is the least specific of the three: an operator's own marker or a field the
+    # C2 filled in describes this task, while the table only knows what a command of that name
+    # does. Without it an Outflank engagement carries no ATT&CK data at all and the Navigator layer
+    # enrich_ttp exports comes out empty.
+    for technique in TASK_NAME_TECHNIQUES.get(command.strip().lower(), []):
+        add(technique)
     return ids
 
 

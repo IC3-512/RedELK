@@ -146,3 +146,51 @@ def test_the_script_is_wired_into_the_filter():
     assert source.index("outflankstage1_task_to_ttp.rb") < source.index(
         "mitre_make_technique_references.rb"
     ), "references are built from the ids, so the mapping has to run first"
+
+
+def test_the_python_and_ruby_tables_are_identical():
+    """Both ingest paths must agree, and they are in different languages in different containers.
+
+    The API connector writes straight to Elasticsearch with bulk_update, so the Logstash filter -
+    and the Ruby table it calls - never sees those documents. The table therefore exists twice.
+    Sharing one file would mean mounting it into both redelk-base and redelk-logstash; a test that
+    fails the moment they disagree is cheaper and cannot be forgotten in a merge.
+    """
+    import sys
+
+    from conftest import DAEMON_SCRIPTS_DIR
+
+    sys.path.insert(0, str(DAEMON_SCRIPTS_DIR))
+    from modules.enrich_outflankc2.convert import TASK_NAME_TECHNIQUES
+
+    assert TASK_NAME_TECHNIQUES == mapping()
+
+
+def test_the_api_path_falls_back_to_the_task_name():
+    """OC2 records no technique field, so without this the API path produces no ATT&CK data."""
+    import sys
+
+    from conftest import DAEMON_SCRIPTS_DIR
+
+    sys.path.insert(0, str(DAEMON_SCRIPTS_DIR))
+    from modules.enrich_outflankc2.convert import extract_technique_ids
+
+    assert extract_technique_ids({"task": "screenshot"}) == ["T1113"]
+    assert extract_technique_ids({"task": "download"}) == ["T1005", "T1041"]
+    assert extract_technique_ids({"task": "cd"}) == []
+
+
+def test_an_explicit_field_still_beats_the_task_name():
+    """The table is the least specific source; anything the C2 or the operator states wins."""
+    import sys
+
+    from conftest import DAEMON_SCRIPTS_DIR
+
+    sys.path.insert(0, str(DAEMON_SCRIPTS_DIR))
+    from modules.enrich_outflankc2.convert import extract_technique_ids
+
+    assert extract_technique_ids({"task": "screenshot", "techniques": ["T1234"]}) == ["T1234"]
+    # An inline marker also wins. Note it has to be in the field first_value actually picks -
+    # TASK_COMMAND_FIELDS is a priority list, not a set of places to search, so a marker in
+    # `command` is invisible whenever `task` is also present.
+    assert extract_technique_ids({"task": "<T1235> screenshot"}) == ["T1235"]
