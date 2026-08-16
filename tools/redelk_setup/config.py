@@ -153,7 +153,12 @@ class Config:
             return str(tag)
         version_file = self.root / "VERSION"
         if version_file.is_file():
-            return version_file.read_text(encoding="utf-8").strip()
+            # VERSION follows the git tag convention and carries a leading "v" (release-drafter
+            # cuts "v$RESOLVED_VERSION"), but the images are published by docker/metadata-action's
+            # `type=semver,pattern={{version}}`, which strips it. Passing "v3.0.0" straight through
+            # asks the registry for a tag that is never published, and the whole stack fails to
+            # pull on a fresh install.
+            return version_file.read_text(encoding="utf-8").strip().removeprefix("v")
         return "latest"
 
     @property

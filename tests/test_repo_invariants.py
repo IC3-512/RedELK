@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -297,6 +298,35 @@ def test_the_example_pins_the_elastic_version_the_workflows_expect():
     document = yaml.safe_load((REPO_ROOT / "redelk.yml.example").read_text(encoding="utf-8"))
     version = str(document["elastic"]["version"])
     assert version.count(".") == 2, "the Logstash image tag needs a full x.y.z version"
+
+
+def test_the_default_image_tag_is_one_the_image_workflow_publishes():
+    """VERSION feeds the image tag, and only the workflow decides what tags exist.
+
+    docker/metadata-action's `type=semver,pattern={{version}}` publishes plain semver, so a
+    VERSION of "v3.0.0" resolved verbatim would pull "v3.0.0" - a tag that is never pushed, on
+    every service built from a RedELK image. The two have to be read together or a fresh install
+    fails at the pull, which is the least diagnosable moment for it to fail.
+    """
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows/docker-images.yml").read_text(encoding="utf-8")
+    )
+    tags = next(
+        step["with"]["tags"]
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("id") == "meta"
+    )
+    assert "pattern={{version}}" in tags, "the release tag pattern moved; re-check the v-stripping"
+
+    from redelk_setup import config as config_module
+
+    resolved = config_module.Config.image_tag.fget(
+        types.SimpleNamespace(raw={"elastic": {"image_tag": ""}}, root=REPO_ROOT)
+    )
+    assert not resolved.startswith("v"), (
+        f"VERSION resolves to {resolved!r}, but the workflow publishes it without the leading v"
+    )
 
 
 # --------------------------------------------------------------------------------------------

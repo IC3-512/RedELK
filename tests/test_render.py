@@ -106,6 +106,28 @@ def test_env_is_a_valid_key_value_file(generated, elkserver, result):
     assert values["REDELK_IMAGE_TAG"] == "3.0.0-test"  # from the VERSION file in fake_root
 
 
+def test_the_image_tag_drops_the_v_that_the_published_tags_do_not_carry(generated, fake_root):
+    """VERSION carries the git tag convention ("v3.0.0"); the registry does not.
+
+    The images are published by docker/metadata-action's `type=semver,pattern={{version}}`, which
+    strips the "v". Passing VERSION through unchanged asks for a tag nothing ever pushes, so on a
+    fresh install every service using a RedELK-built image fails to pull.
+    """
+    (fake_root / "VERSION").write_text("v3.0.0\n", encoding="utf-8")
+    cfg = generated({"elastic": {"image_tag": ""}})
+
+    assert cfg.image_tag == "3.0.0"
+
+
+def test_an_explicit_image_tag_is_passed_through_verbatim(generated, fake_root):
+    """Stripping the "v" is a property of reading VERSION, not of the tag. Someone pinning a
+    branch build (`master`) or a sha tag must get exactly the tag they wrote."""
+    (fake_root / "VERSION").write_text("v3.0.0\n", encoding="utf-8")
+
+    assert generated({"elastic": {"image_tag": "master"}}).image_tag == "master"
+    assert generated({"elastic": {"image_tag": "sha-55456c5"}}).image_tag == "sha-55456c5"
+
+
 def test_env_is_written_0600_because_it_holds_every_password(generated, elkserver, result):
     cfg = generated()
     render.render_env(cfg, elkserver, result)
