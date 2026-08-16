@@ -3,8 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through
-[GitHub's private vulnerability reporting](https://github.com/outflanknl/RedELK/security/advisories/new),
-or by e-mail to <redelk@outflank.nl>.
+[GitHub's private vulnerability reporting](https://github.com/IC3-512/RedELK/security/advisories/new).
 
 Please include the RedELK version, which component is affected, and enough detail to reproduce the
 issue. Do not open a public issue, and do not include customer data or live operational

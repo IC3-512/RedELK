@@ -119,7 +119,7 @@ elastic:
 
   # Docker repository and tag for the two images RedELK builds itself (redelk-base and
   # redelk-jupyter). Elasticsearch, Kibana and Logstash use the stock docker.elastic.co images.
-  image_repo: outflanknl
+  image_repo: ghcr.io/ic3-512
   image_tag: "" # defaults to the contents of ./VERSION
 
   # Build the RedELK images locally instead of pulling them. Useful when you modified them.

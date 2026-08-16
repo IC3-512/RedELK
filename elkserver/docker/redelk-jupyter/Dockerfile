@@ -14,7 +14,7 @@
 FROM quay.io/jupyter/scipy-notebook:2025-08-11
 
 LABEL org.opencontainers.image.title="RedELK Jupyter Notebooks"
-LABEL org.opencontainers.image.source="https://github.com/outflanknl/RedELK"
+LABEL org.opencontainers.image.source="https://github.com/IC3-512/RedELK"
 
 # The Elasticsearch client major must match the cluster (9.x), which is exactly the skew the old
 # image had: it pinned elasticsearch==7.17.3 against a 7.17.9 cluster and would silently fail

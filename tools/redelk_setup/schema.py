@@ -145,7 +145,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "elastic": {
         "version": "9.5.0",
-        "image_repo": "outflanknl",
+        "image_repo": "ghcr.io/ic3-512",
         "image_tag": "",
         "build_local": False,
         "retention": {"hot_days": 30, "delete_days": 365},

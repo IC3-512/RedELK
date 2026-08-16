@@ -38,7 +38,7 @@ v3 dashboards will be empty for the imported data.
    stopped first - the ports and the docker volume names collide.
 
    ```sh
-   git clone https://github.com/outflanknl/RedELK.git redelk-v3
+   git clone https://github.com/IC3-512/RedELK.git redelk-v3
    cd redelk-v3
    ./redelkctl init
    $EDITOR redelk.yml            # see the mapping table below

@@ -102,7 +102,7 @@ All must be 1-65535.
 | Key | Type | Default | Affects |
 |---|---|---|---|
 | `elastic.version` | string | `9.5.0` | The tag of the stock `docker.elastic.co` Elasticsearch, Kibana and Logstash images, **and** the Filebeat version the client installer pins on every shipper. Must be `X.Y.Z` and major >= 9. |
-| `elastic.image_repo` | string | `outflanknl` | Docker repository of the RedELK-built images (`redelk-base`, `redelk-jupyter`). |
+| `elastic.image_repo` | string | `ghcr.io/ic3-512` | Docker repository of the RedELK-built images (`redelk-base`, `redelk-jupyter`). |
 | `elastic.image_tag` | string | `""` | Tag for those images. Empty means the contents of `./VERSION`. |
 | `elastic.build_local` | boolean | `false` | Build `redelk-base` / `redelk-jupyter` locally (`docker compose up --build`) instead of pulling. Use it when you modified them. |
 | `elastic.retention.hot_days` | number | `30` | Age at which an index moves to the warm phase (force-merged, lower priority). |

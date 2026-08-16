@@ -355,5 +355,5 @@ Collect this before asking for help:
 ./redelkctl logs --tail 200 > redelk-logs.txt
 ```
 
-Report bugs at <https://github.com/outflanknl/RedELK/issues>, security issues privately as
+Report bugs at <https://github.com/IC3-512/RedELK/issues>, security issues privately as
 described in [SECURITY.md](../SECURITY.md). Never attach real operational data.

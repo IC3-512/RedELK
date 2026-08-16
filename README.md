@@ -56,7 +56,7 @@ from the C2's own metadata.
 RedELK v3 is one configuration file and one command.
 
 ```sh
-git clone https://github.com/outflanknl/RedELK.git && cd RedELK
+git clone https://github.com/IC3-512/RedELK.git && cd RedELK
 cp redelk.yml.example redelk.yml       # or: ./redelkctl init
 $EDITOR redelk.yml                     # at minimum: server.hostnames, c2_servers, redirectors
 sudo ./redelkctl install               # generate everything and start the stack

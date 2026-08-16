@@ -17,7 +17,7 @@ FROM python:3.13-slim-bookworm
 
 LABEL org.opencontainers.image.title="RedELK Base"
 LABEL org.opencontainers.image.description="RedELK alarm, enrichment and C2 connector runtime"
-LABEL org.opencontainers.image.source="https://github.com/outflanknl/RedELK"
+LABEL org.opencontainers.image.source="https://github.com/IC3-512/RedELK"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

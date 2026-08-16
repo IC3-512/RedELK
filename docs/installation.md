@@ -40,7 +40,7 @@ the RedELK server's ingest port (5044 by default).
 ### 1.1 Get the code and write the configuration
 
 ```sh
-git clone https://github.com/outflanknl/RedELK.git
+git clone https://github.com/IC3-512/RedELK.git
 cd RedELK
 ./redelkctl init            # copies redelk.yml.example to redelk.yml
 $EDITOR redelk.yml

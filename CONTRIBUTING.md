@@ -12,7 +12,7 @@ file, `redelk.yml`. Everything else - TLS certificates, the docker `.env`, the d
 You need Python 3.10 or newer, and Docker with the Compose v2 plugin if you want to run the stack.
 
 ```bash
-git clone https://github.com/outflanknl/RedELK.git
+git clone https://github.com/IC3-512/RedELK.git
 cd RedELK
 
 # Create your configuration. redelk.yml and redelk.secrets.yml are git-ignored.
