@@ -293,10 +293,12 @@ class Module:
     ) -> tuple[list[Doc], datetime.datetime | None]:
         """Tasks -> implant_task and, once they finished, implant_taskcomplete rtops lines."""
         path = self.resolve_endpoint("tasks", client, cursor, implants)
-        if not path:
-            return [], None
-
-        items = self.fetch_collection(path, client, implants, ctx)
+        if path:
+            items = self.fetch_collection(path, client, implants, ctx)
+        else:
+            # No task-list endpoint (Outflank Stage1): the implant list carries an empty
+            # "tasks" and the real tasks live in the per-implant detail. Read them there.
+            items = self.fetch_embedded_collection("tasks", client, cursor, implants, ctx)
         if items is None:
             return [], None
 
@@ -435,6 +437,73 @@ class Module:
                 # so it is added here - everything downstream expects to find it.
                 item.setdefault("implant_uid", uid)
             collected.extend(items)
+        return collected
+
+    def fetch_embedded_collection(
+        self,
+        kind: str,
+        client: OutflankC2Client,
+        cursor: dict,
+        implants: dict[str, dict],
+        ctx: ServerContext,
+    ) -> list[dict] | None:
+        """Read a collection a build embeds in the per-implant detail rather than exposing as a
+        list endpoint.
+
+        Outflank Stage1 has no /api/tasks: the implant *list* carries an empty ``tasks`` and the
+        tasks live in the implant *detail* at ``/api/implants/<uid>``. resolve_endpoint returns
+        '' for such a build, and this is the fallback. Presence is remembered in the cursor the
+        same way resolve_endpoint remembers a missing endpoint, so a build that embeds nothing is
+        not re-probed on every poll.
+        """
+        if not implants:
+            return None
+
+        state = cursor.setdefault("embedded", {}).setdefault(kind, {})
+        if state.get("available") is False:
+            age = seconds_since(state.get("checked"))
+            if age is not None and age < PROBE_RETRY_SECONDS:
+                return None
+
+        base = client.endpoints["implants"]
+        collected: list[dict] = []
+        exposed = False
+        for uid in implants:
+            status, detail = client.get_json(f"{base}/{uid}")
+            if status != 200 or not isinstance(detail, dict):
+                continue
+            if kind not in detail:
+                continue
+            # The field is present, so this build embeds the collection - even when it happens to
+            # be empty for this implant right now.
+            exposed = True
+            embedded = detail[kind]
+            if isinstance(embedded, list):
+                for item in embedded:
+                    if isinstance(item, dict):
+                        # A per implant object has no reason to repeat the implant id, so add it -
+                        # everything downstream expects to find it.
+                        item.setdefault("implant_uid", uid)
+                        collected.append(item)
+
+        if not exposed:
+            state.update({"available": False, "checked": now_iso()})
+            self.logger.info(
+                "Outflank C2 [%s] embeds no %s in the implant detail; %s tracking stays disabled",
+                ctx.name,
+                kind,
+                kind,
+            )
+            return None
+
+        if not state.get("available"):
+            state.update({"available": True, "checked": now_iso()})
+            self.logger.info(
+                "Outflank C2 [%s] embeds %s in the implant detail at %s/<uid>",
+                ctx.name,
+                kind,
+                base,
+            )
         return collected
 
     # ----------------------------------------------------------------------------------------

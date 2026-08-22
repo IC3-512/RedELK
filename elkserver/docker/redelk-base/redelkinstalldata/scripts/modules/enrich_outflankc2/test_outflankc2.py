@@ -869,3 +869,178 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------------------------
+# Tasks embedded in the implant detail (Outflank Stage1 has no /api/tasks list endpoint)
+# ---------------------------------------------------------------------------------------------
+
+
+def test_tasks_embedded_in_implant_detail_are_read():
+    """A build with no task-list endpoint (Outflank Stage1) embeds the tasks in the implant
+    detail at /api/implants/<uid>; the fallback reads them and stamps the implant id on each."""
+    module = oc2.Module()
+
+    class DetailClient:
+        endpoints = {"implants": "/api/implants"}
+
+        def __init__(self):
+            self.gets = []
+
+        def get_json(self, path):
+            self.gets.append(path)
+            return 200, {
+                "uid": "I9TADD99",
+                "tasks": [
+                    {"uid": "TA", "name": "download", "timestamp": "2026-08-22T15:00:00"},
+                    {"uid": "TB", "name": "ls", "timestamp": "2026-08-22T15:01:00"},
+                ],
+            }
+
+    client = DetailClient()
+    cursor = {"server": "oc2"}
+    items = module.fetch_embedded_collection("tasks", client, cursor, IMPLANTS, CTX)
+
+    assert client.gets == ["/api/implants/I9TADD99"]
+    assert [t["name"] for t in items] == ["download", "ls"]
+    assert all(t["implant_uid"] == "I9TADD99" for t in items)
+    assert cursor["embedded"]["tasks"]["available"] is True
+
+
+def test_build_without_embedded_tasks_is_disabled():
+    """No tasks field at all -> the build exposes none, recorded so it is not re-probed forever."""
+    module = oc2.Module()
+
+    class NoTasksClient:
+        endpoints = {"implants": "/api/implants"}
+
+        def get_json(self, path):
+            return 200, {"uid": "I9TADD99"}  # no "tasks" key
+
+    cursor = {"server": "oc2"}
+    assert module.fetch_embedded_collection("tasks", NoTasksClient(), cursor, IMPLANTS, CTX) is None
+    assert cursor["embedded"]["tasks"]["available"] is False
+
+
+def test_empty_embedded_tasks_field_stays_available():
+    """A present-but-empty tasks field means the build embeds tasks (none yet): stay available
+    and return nothing, rather than disabling the fallback."""
+    module = oc2.Module()
+
+    class EmptyTasksClient:
+        endpoints = {"implants": "/api/implants"}
+
+        def get_json(self, path):
+            return 200, {"uid": "I9TADD99", "tasks": []}
+
+    cursor = {"server": "oc2"}
+    items = module.fetch_embedded_collection("tasks", EmptyTasksClient(), cursor, IMPLANTS, CTX)
+    assert items == []
+    assert cursor["embedded"]["tasks"]["available"] is True
+
+
+# ---------------------------------------------------------------------------------------------
+# End-to-end against the REAL Outflank Stage1 shape.
+#
+# The connector silently produced no tasks (and so no ATT&CK) on Stage1 for a long time while
+# every unit test was green, because the tests mocked a /api/tasks list endpoint that Stage1
+# does not have. These fixtures are captured from a live Stage1 build (values sanitised): the
+# implant list and detail share every key, only the detail populates "tasks", and there is no
+# task-list endpoint. A regression here means "the connector stopped reading Stage1 tasks".
+# ---------------------------------------------------------------------------------------------
+
+STAGE1_IMPLANT_DETAIL = {
+    "_type": "Implant",
+    "uid": "I9TADD99",
+    "hostname": "WORKSTATION-01",
+    "username": "user",
+    "os": "Windows 11.0 (OS Build 26100)",
+    "recipe": "https",
+    "first_seen": "2024-05-14T12:00:00",
+    "last_seen": "2024-05-14T13:30:00",
+    "tasks": [
+        {"_type": "Task", "uid": "T-DL", "name": "download", "out_name": "download",
+         "arguments": "C:\\loot\\secrets.zip", "run_arguments": ["C:\\loot\\secrets.zip"],
+         "operator": "op", "state": 500, "response": "ok",
+         "response_timestamp": "2024-05-14T13:00:05", "timestamp": "2024-05-14T13:00:00"},
+        {"_type": "Task", "uid": "T-LS", "name": "ls", "out_name": "ls", "arguments": "C:\\",
+         "run_arguments": ["C:\\"], "operator": "op", "state": 500, "response": "<dir>",
+         "response_timestamp": "2024-05-14T13:01:05", "timestamp": "2024-05-14T13:01:00"},
+        {"_type": "Task", "uid": "T-SL", "name": "sleep", "out_name": "sleep", "arguments": "60",
+         "run_arguments": ["60"], "operator": "op", "state": 500, "response": "",
+         "response_timestamp": "2024-05-14T13:02:01", "timestamp": "2024-05-14T13:02:00"},
+    ],
+}
+STAGE1_IMPLANT_SUMMARY = {**STAGE1_IMPLANT_DETAIL, "tasks": []}  # the list omits task contents
+
+
+class FakeStage1Client:
+    """The Outflank Stage1 REST contract: /api/implants returns summaries with an empty "tasks",
+    the per-implant detail embeds the tasks, and every task/screenshot/... list-endpoint probe
+    404s. This is exactly the shape the connector must handle and previously did not."""
+
+    def __init__(self, detail=STAGE1_IMPLANT_DETAIL):
+        self.endpoints = {
+            "implants": "/api/implants", "downloads": "/api/downloads/views/default",
+            "tasks": "", "screenshots": "", "keystrokes": "", "credentials": "",
+        }
+        self._detail = detail
+        self.collection_probes = []
+        self.detail_gets = []
+
+    def get_collection(self, path):
+        self.collection_probes.append(path)  # Stage1 has no such list endpoint
+        return (404, None)
+
+    def get_list(self, path):
+        if path == "/api/implants":
+            return (200, [{**self._detail, "tasks": []}])
+        return (404, [])
+
+    def get_json(self, path):
+        self.detail_gets.append(path)
+        if path == f"/api/implants/{self._detail['uid']}":
+            return (200, self._detail)
+        return (404, None)
+
+
+def test_stage1_shape_tags_tasks_end_to_end():
+    """collect_tasks against the real Stage1 shape emits implant_task documents carrying the
+    ATT&CK technique each command maps to. If the embedded-tasks fallback regresses, this test
+    goes red instead of the connector silently tracking nothing."""
+    module = oc2.Module()
+    client = FakeStage1Client()
+    cursor = {"server": "oc2"}
+    implants = {"I9TADD99": STAGE1_IMPLANT_SUMMARY}
+
+    docs, _ = module.collect_tasks(client, CTX, cursor, implants, NOW)
+
+    # The list endpoints were probed and none existed; the tasks came from the implant detail.
+    assert "/api/implants/I9TADD99/tasks" in client.collection_probes
+    assert client.detail_gets == ["/api/implants/I9TADD99"]
+    assert cursor["embedded"]["tasks"]["available"] is True
+
+    tagged = {}
+    for d in docs:
+        if d.source["c2"]["log"]["type"] != "implant_task":
+            continue
+        tagged[d.source["c2"]["command"]["name"]] = (
+            d.source.get("threat", {}).get("technique", {}).get("id")
+        )
+    assert tagged["download"] == ["T1005", "T1041"]
+    assert tagged["ls"] == ["T1083"]
+    assert tagged["sleep"] is None  # a command with no mapping still logs, without a threat block
+
+
+def test_stage1_list_endpoint_is_never_relied_on_for_tasks():
+    """The implant list carries an empty "tasks"; the connector must not read tasks from it, or
+    a Stage1 build looks task-free. Guards the specific mistake that hid the bug."""
+    module = oc2.Module()
+    client = FakeStage1Client()
+    cursor = {"server": "oc2"}
+    # Nothing embedded -> no documents; but crucially the list's empty "tasks" is not mistaken
+    # for "this implant ran nothing".
+    docs, _ = module.collect_tasks(
+        client, CTX, cursor, {"I9TADD99": STAGE1_IMPLANT_SUMMARY}, NOW
+    )
+    assert any(d.source["c2"]["command"]["name"] == "download" for d in docs)
