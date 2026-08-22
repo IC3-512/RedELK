@@ -382,14 +382,20 @@ def test_task_completion_detection():
     # complete even when its response is empty - a `sleep` returns nothing but has still finished.
     stage1_done = {"state": 500, "response": "<dir>", "response_timestamp": "2026-08-22T18:20:27"}
     assert convert.task_is_completed(stage1_done, "500", "<dir>") is True
-    stage1_done_no_output = {"state": 500, "response": "", "response_timestamp": "2026-08-22T18:20:27"}
+    stage1_done_no_output = {
+        "state": 500,
+        "response": "",
+        "response_timestamp": "2026-08-22T18:20:27",
+    }
     assert convert.task_is_completed(stage1_done_no_output, "500", "") is True
     # A task whose result has not arrived carries no populated response_timestamp (absent or
     # empty) and a state that is not the 500 Stage1 uses for a returned result: it must stay
     # unfinished, or the sync watermark advances past a result that never got read.
     assert convert.task_is_completed({"state": 200, "response": ""}, "200", "") is False
     assert (
-        convert.task_is_completed({"state": 200, "response": "", "response_timestamp": ""}, "200", "")
+        convert.task_is_completed(
+            {"state": 200, "response": "", "response_timestamp": ""}, "200", ""
+        )
         is False
     )
 
@@ -974,16 +980,45 @@ STAGE1_IMPLANT_DETAIL = {
     "first_seen": "2024-05-14T12:00:00",
     "last_seen": "2024-05-14T13:30:00",
     "tasks": [
-        {"_type": "Task", "uid": "T-DL", "name": "download", "out_name": "download",
-         "arguments": "C:\\loot\\secrets.zip", "run_arguments": ["C:\\loot\\secrets.zip"],
-         "operator": "op", "state": 500, "response": "ok",
-         "response_timestamp": "2024-05-14T13:00:05", "timestamp": "2024-05-14T13:00:00"},
-        {"_type": "Task", "uid": "T-LS", "name": "ls", "out_name": "ls", "arguments": "C:\\",
-         "run_arguments": ["C:\\"], "operator": "op", "state": 500, "response": "<dir>",
-         "response_timestamp": "2024-05-14T13:01:05", "timestamp": "2024-05-14T13:01:00"},
-        {"_type": "Task", "uid": "T-SL", "name": "sleep", "out_name": "sleep", "arguments": "60",
-         "run_arguments": ["60"], "operator": "op", "state": 500, "response": "",
-         "response_timestamp": "2024-05-14T13:02:01", "timestamp": "2024-05-14T13:02:00"},
+        {
+            "_type": "Task",
+            "uid": "T-DL",
+            "name": "download",
+            "out_name": "download",
+            "arguments": "C:\\loot\\secrets.zip",
+            "run_arguments": ["C:\\loot\\secrets.zip"],
+            "operator": "op",
+            "state": 500,
+            "response": "ok",
+            "response_timestamp": "2024-05-14T13:00:05",
+            "timestamp": "2024-05-14T13:00:00",
+        },
+        {
+            "_type": "Task",
+            "uid": "T-LS",
+            "name": "ls",
+            "out_name": "ls",
+            "arguments": "C:\\",
+            "run_arguments": ["C:\\"],
+            "operator": "op",
+            "state": 500,
+            "response": "<dir>",
+            "response_timestamp": "2024-05-14T13:01:05",
+            "timestamp": "2024-05-14T13:01:00",
+        },
+        {
+            "_type": "Task",
+            "uid": "T-SL",
+            "name": "sleep",
+            "out_name": "sleep",
+            "arguments": "60",
+            "run_arguments": ["60"],
+            "operator": "op",
+            "state": 500,
+            "response": "",
+            "response_timestamp": "2024-05-14T13:02:01",
+            "timestamp": "2024-05-14T13:02:00",
+        },
     ],
 }
 STAGE1_IMPLANT_SUMMARY = {**STAGE1_IMPLANT_DETAIL, "tasks": []}  # the list omits task contents
@@ -996,8 +1031,12 @@ class FakeStage1Client:
 
     def __init__(self, detail=STAGE1_IMPLANT_DETAIL):
         self.endpoints = {
-            "implants": "/api/implants", "downloads": "/api/downloads/views/default",
-            "tasks": "", "screenshots": "", "keystrokes": "", "credentials": "",
+            "implants": "/api/implants",
+            "downloads": "/api/downloads/views/default",
+            "tasks": "",
+            "screenshots": "",
+            "keystrokes": "",
+            "credentials": "",
         }
         self._detail = detail
         self.collection_probes = []
@@ -1082,9 +1121,7 @@ def test_stage1_list_endpoint_is_never_relied_on_for_tasks():
     cursor = {"server": "oc2"}
     # Nothing embedded -> no documents; but crucially the list's empty "tasks" is not mistaken
     # for "this implant ran nothing".
-    docs, _ = module.collect_tasks(
-        client, CTX, cursor, {"I9TADD99": STAGE1_IMPLANT_SUMMARY}, NOW
-    )
+    docs, _ = module.collect_tasks(client, CTX, cursor, {"I9TADD99": STAGE1_IMPLANT_SUMMARY}, NOW)
     assert any(d.source["c2"]["command"]["name"] == "download" for d in docs)
 
 

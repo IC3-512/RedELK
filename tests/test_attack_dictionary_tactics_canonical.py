@@ -160,7 +160,10 @@ if __name__ == "__main__":
     # guard can be run as `python3 test_attack_dictionary_tactics_canonical.py`.
     _checks = [
         ("dictionary_tracks_the_pinned_release", test_dictionary_tracks_the_pinned_release),
-        ("shipped_dictionary_uses_only_canonical_tactics", test_shipped_dictionary_uses_only_canonical_tactics),
+        (
+            "shipped_dictionary_uses_only_canonical_tactics",
+            test_shipped_dictionary_uses_only_canonical_tactics,
+        ),
     ]
     _failures = 0
     for _name, _check in _checks:
