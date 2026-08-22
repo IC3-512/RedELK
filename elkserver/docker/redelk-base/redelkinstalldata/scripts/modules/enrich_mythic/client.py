@@ -57,6 +57,12 @@ PING_QUERY = (
     "query RedELKPing { callback(limit: 1) { id } callback_aggregate { aggregate { max { id } } } }"
 )
 
+# The same probe without the aggregate, for a token whose Hasura role may select callback but not
+# callback_aggregate: Hasura fails the whole ping on a schema error rather than an auth one, so the
+# aggregate takes a valid token down with it. Stepping down proves the token works, at the cost of
+# rewind detection (max_callback_id stays None). Mirrors the selection-set step-down in _fetch.
+PING_FALLBACK_QUERY = "query RedELKPing { callback(limit: 1) { id } }"
+
 
 class MythicClient:
     """Talks to one Mythic server."""
@@ -171,6 +177,28 @@ class MythicClient:
             if _looks_like(message, _AUTH_ERROR_MARKERS):
                 self.logger.debug("Mythic authentication probe rejected: %s", message)
                 return False, "auth"
+            if _looks_like(message, _SCHEMA_ERROR_MARKERS):
+                # A role that may select callback but not callback_aggregate (or a Mythic without
+                # the aggregate) fails the full ping on a schema error, not an auth one, which
+                # would otherwise report a valid token as rejected. Step down to the bare callback
+                # the way _fetch steps down its selection set, and give up rewind detection.
+                self.logger.info(
+                    "this Mythic will not answer the callback_aggregate probe (%s); retrying with "
+                    "a smaller query and disabling rewind detection",
+                    message,
+                )
+                self.max_callback_id = None
+                data, errors = self.client.execute(PING_FALLBACK_QUERY)
+                if not errors and data is not None:
+                    return True, ""
+                if errors:
+                    message = error_messages(errors)
+                    if _looks_like(message, _AUTH_ERROR_MARKERS):
+                        self.logger.debug("Mythic authentication probe rejected: %s", message)
+                        return False, "auth"
+                    self.logger.error("Mythic rejected the probe query: %s", message)
+                    return False, "error"
+                return False, "unreachable"
             self.logger.error("Mythic rejected the probe query: %s", message)
             return False, "error"
         if data is None:

@@ -47,6 +47,12 @@ from modules.c2api.util import (
 
 C2_PROGRAM = "mythic"
 
+# alarm_manual gates implant_task behind tags:enrich_*; the daemon tags file-based C2 hits after
+# the fact, but a Mythic document is complete when this connector writes it, so the tag is written
+# with the document. Defined locally (not imported from module.py) to keep this file free of the
+# config/module imports test_mythic.py runs without - the same value and reason as enrich_outflankc2.
+SUBMODULE = "enrich_mythic"
+
 # Command output is unbounded: `ls -R C:\` or a hex dump easily runs into megabytes, and every
 # Kibana row then drags that payload along. Configurable per C2 server through max_output_size.
 DEFAULT_MAX_OUTPUT = 100 * 1024
@@ -106,6 +112,10 @@ def base_document(ctx: Context, log_type: str, timestamp: Any, raw_timestamp: An
             "action": log_type,
             "type": log_type,
         },
+        # Written with the document so alarm_manual's tags:enrich_* gate matches an implant_task
+        # line the moment it is indexed, the way enrich_outflankc2 tags every line it writes.
+        # Without it a REDELK_ALARM an operator types into a Mythic task never fires.
+        "tags": [SUBMODULE],
     }
     return document
 
