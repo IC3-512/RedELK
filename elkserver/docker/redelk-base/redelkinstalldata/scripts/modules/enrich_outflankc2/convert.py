@@ -146,7 +146,21 @@ TASK_OPERATOR_FIELDS = ("operator", "created_by", "issued_by", "user", "username
 TASK_STATUS_FIELDS = ("status", "state")
 TASK_COMPLETED_FIELDS = ("completed", "done", "finished", "is_completed")
 TASK_CREATED_TIME_FIELDS = TIMESTAMP_FIELDS + ("issued_at",)
-TASK_COMPLETED_TIME_FIELDS = ("completed_at", "finished_at", "response_time", "updated_at", "end")
+TASK_COMPLETED_TIME_FIELDS = (
+    "completed_at",
+    "finished_at",
+    "response_time",
+    # Outflank Stage1 stamps response_timestamp the moment a task's result comes back (its state
+    # stays the numeric 500, which matches no COMPLETED_STATES word, and it exposes no boolean
+    # completion flag - see the column list on TASK_TTP_FIELDS above). A populated
+    # response_timestamp is therefore Stage1's "the result arrived" signal: it both makes
+    # task_is_completed's timestamp guard recognise the task as finished and stamps `finished`
+    # from when the response landed rather than from when the task was issued. A queued or running
+    # task has not answered yet, so it carries no response_timestamp and stays unfinished.
+    "response_timestamp",
+    "updated_at",
+    "end",
+)
 
 # A task counts as finished when its status says so. Everything else keeps the sync watermark
 # from advancing past it, so its result is picked up on a later poll.

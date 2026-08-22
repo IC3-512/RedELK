@@ -356,9 +356,12 @@ def test_task_technique_shapes():
     assert convert.extract_technique_ids({"attack": [{"id": "T1055", "name": "x"}]}) == ["T1055"]
     assert convert.extract_technique_ids({"mitre": "T1082, T1057"}) == ["T1082", "T1057"]
     assert convert.extract_technique_ids({"command": "run [T1059.001] powershell"}) == ["T1059.001"]
-    # An explicit field that holds nothing usable falls through to the text, and prose is not
-    # mistaken for a technique.
-    assert convert.extract_technique_ids({"techniques": [], "command": "ls"}) == []
+    # An explicit field that holds nothing usable falls through to the command: "ls" carries no
+    # inline marker, so the last resort - the command-name table (3773f80 added ls -> T1083) -
+    # tags it.
+    assert convert.extract_technique_ids({"techniques": [], "command": "ls"}) == ["T1083"]
+    # ...but a command that is only prose, with no marker and no name the table knows, stays
+    # untagged rather than being guessed at.
     assert convert.extract_technique_ids({"command": "echo [TODO] later"}) == []
 
 
@@ -373,6 +376,22 @@ def test_task_completion_detection():
     assert convert.task_is_completed({"finished_at": "2024-05-14T13:00:00"}, "", "") is True
     assert convert.task_is_completed({}, "", "some output") is True
     assert convert.task_is_completed({}, "", "") is False
+
+    # Outflank Stage1: the state is the numeric 500 (no COMPLETED_STATES word matches "500") and
+    # the result is signalled by a populated response_timestamp. A finished task counts as
+    # complete even when its response is empty - a `sleep` returns nothing but has still finished.
+    stage1_done = {"state": 500, "response": "<dir>", "response_timestamp": "2026-08-22T18:20:27"}
+    assert convert.task_is_completed(stage1_done, "500", "<dir>") is True
+    stage1_done_no_output = {"state": 500, "response": "", "response_timestamp": "2026-08-22T18:20:27"}
+    assert convert.task_is_completed(stage1_done_no_output, "500", "") is True
+    # A task whose result has not arrived carries no populated response_timestamp (absent or
+    # empty) and a state that is not the 500 Stage1 uses for a returned result: it must stay
+    # unfinished, or the sync watermark advances past a result that never got read.
+    assert convert.task_is_completed({"state": 200, "response": ""}, "200", "") is False
+    assert (
+        convert.task_is_completed({"state": 200, "response": "", "response_timestamp": ""}, "200", "")
+        is False
+    )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -867,10 +886,6 @@ def main() -> int:
     return 1 if failed else 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 # ---------------------------------------------------------------------------------------------
 # Tasks embedded in the implant detail (Outflank Stage1 has no /api/tasks list endpoint)
 # ---------------------------------------------------------------------------------------------
@@ -1021,15 +1036,42 @@ def test_stage1_shape_tags_tasks_end_to_end():
     assert cursor["embedded"]["tasks"]["available"] is True
 
     tagged = {}
+    completed_outputs = {}
+    issued_ts = {}
+    completed_ts = {}
     for d in docs:
-        if d.source["c2"]["log"]["type"] != "implant_task":
-            continue
-        tagged[d.source["c2"]["command"]["name"]] = (
-            d.source.get("threat", {}).get("technique", {}).get("id")
-        )
+        log_type = d.source["c2"]["log"]["type"]
+        name = d.source["c2"]["command"]["name"]
+        if log_type == "implant_task":
+            tagged[name] = d.source.get("threat", {}).get("technique", {}).get("id")
+            issued_ts[name] = d.source["@timestamp"]
+        elif log_type == "implant_taskcomplete":
+            # .get, because a finished task that returned nothing carries no implant.output.
+            completed_outputs[name] = d.source["implant"].get("output")
+            completed_ts[name] = d.source["@timestamp"]
     assert tagged["download"] == ["T1005", "T1041"]
     assert tagged["ls"] == ["T1083"]
     assert tagged["sleep"] is None  # a command with no mapping still logs, without a threat block
+
+    # BUG #1 regression guard. A finished Stage1 task (state=500, a populated response_timestamp)
+    # must ALSO produce the implant_taskcomplete line - the ONLY document that carries
+    # implant.output, i.e. the command's actual response. The loop above previously did
+    # `continue` on every non-implant_task doc, so a connector that emitted no taskcomplete docs
+    # at all still passed: that blind spot is exactly how #1 stayed invisible.
+    assert set(completed_outputs) == {"download", "ls", "sleep"}
+    assert completed_outputs["ls"] == "<dir>"
+    assert completed_outputs["download"] == "ok"
+    # sleep finished too - its response_timestamp arrived - but it returned nothing, so its
+    # taskcomplete doc carries no output. Completion is keyed on the result arriving, never on the
+    # result being non-empty; keying on output presence is the mistake this asserts against.
+    assert completed_outputs["sleep"] is None
+
+    # BUG #1 part (b): the taskcomplete line is stamped from when the response arrived
+    # (response_timestamp), not from when the task was issued. ls was issued at 13:01:00 and its
+    # result came back at 13:01:05 - the two lines must carry those two distinct times, so a
+    # future refactor that stops sourcing the finish time from response_timestamp goes red here.
+    assert issued_ts["ls"] == "2024-05-14T13:01:00.000Z"
+    assert completed_ts["ls"] == "2024-05-14T13:01:05.000Z"
 
 
 def test_stage1_list_endpoint_is_never_relied_on_for_tasks():
@@ -1044,3 +1086,7 @@ def test_stage1_list_endpoint_is_never_relied_on_for_tasks():
         client, CTX, cursor, {"I9TADD99": STAGE1_IMPLANT_SUMMARY}, NOW
     )
     assert any(d.source["c2"]["command"]["name"] == "download" for d in docs)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
