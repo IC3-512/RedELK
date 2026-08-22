@@ -365,10 +365,10 @@ def split_user(username: str) -> tuple[str, str]:
 def extract_technique_ids(task: dict, *extra_text: str) -> list[str]:
     """The ATT&CK technique ids on a task, from an explicit field or from inline markers.
 
-    Explicit fields win: OC2 tags tasks with techniques itself, and that metadata is better than
-    anything parsed out of free text. When no candidate field is present the command text is
-    searched for '<T1234>' / '[T1234]' markers, which is how Cobalt Strike ships them and how
-    operators write them into a task by hand.
+    An explicit technique field on the task wins when a C2 supplies one; Outflank does not tag its
+    own commands, so for OC2 the ids come from the command-name map (``TASK_NAME_TECHNIQUES``, e.g.
+    download -> T1005/T1041). The command text is also searched for '<T1234>' / '[T1234]' markers,
+    which is how Cobalt Strike ships them and how operators write them into a task by hand.
     """
     ids: list[str] = []
 

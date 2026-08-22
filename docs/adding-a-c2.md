@@ -197,6 +197,10 @@ Rules the daemon imposes:
   `get_value()`, and `HTTP_TIMEOUT` on **every** outbound `requests` call.
 - Read your targets from `config.c2_servers_of_type("newc2")` - each entry carries its own `url`,
   credentials, `verify_tls`, `poll_interval`, `download_files` and `max_file_size`.
+- A collection the API exposes only inside its parent object - Outflank Stage1 embeds each
+  implant's tasks in the implant detail (`/api/implants/<uid>`) rather than a task-list endpoint -
+  can be read by falling back to that detail; probe for it once and remember the result on the
+  cursor so every poll does not re-probe.
 - Graceful degradation is mandatory: a C2 you cannot reach must log and return an empty result,
   never raise.
 - Never log the token, password or join key.

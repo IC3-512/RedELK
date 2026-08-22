@@ -18,7 +18,10 @@ from SpecterOps' Nemesis OC2 client, which is a working implementation: /api/aut
 keystrokes and credentials are *guesses*: their paths are probed once, and a build that answers
 404 simply gets that part of the integration switched off with one INFO line - never an error,
 never a retry storm. The candidates tried for tasks are /api/tasks/views/default, /api/tasks and
-the per implant /api/implants/<uid>/tasks. Every path can be pinned per C2 server in redelk.yml
+the per implant /api/implants/<uid>/tasks. Tasks get one more try before that switch-off: a
+build with no task-list endpoint at all (Outflank Stage1) has its tasks read embedded in the
+per-implant detail at /api/implants/<uid>, and that embedded fallback is itself probed once and
+remembered. Every path can be pinned per C2 server in redelk.yml
 (c2_servers[].api.endpoints), which is the escape hatch when a build names them differently.
 
 The same honesty applies to the task object's fields: which key holds the command, the operator

@@ -21,10 +21,10 @@ Not every framework reports ATT&CK data, and those that do report different amou
 |---|---|---|
 | Cobalt Strike | The `<T1113, T1093>` marker Cobalt Strike puts in `[task]` beacon log lines. Parsed by `51-filter-c2-cobaltstrike_logstash.conf`. | ids, `threat.framework`, references |
 | Mythic | Technique metadata attached to the command, read through the API. | whatever the C2 supplied - often names and tactics as well (`modules/c2api/attack.py`) |
-| Outflank C2 | Technique metadata attached to the command, read through the API. | same |
+| Outflank C2 | The connector's command name -> technique map; Outflank does not tag its own commands (`modules/enrich_outflankc2/convert.py`). | ids, `threat.framework`, references |
 | PoshC2 | none | - |
 | Sliver | none | - |
-| Outflank Stage1 | none | - |
+| Outflank Stage1 | Same as Outflank C2 - same connector and command-name map. | same |
 
 The two paths meet in the same fields. When a C2 supplies only identifiers, `enrich_ttp` resolves
 the rest; when the API connector already wrote `threat.technique.name`, `enrich_ttp` leaves the
@@ -62,6 +62,10 @@ Written by `enrich_ttp` (`modules/enrich_ttp/`), mapped in the `redelk-threat` c
 | `threat.tactic.id[]` | Tactic ids (`TA0009`, ...) of every technique on the document. |
 | `threat.tactic.name[]` | Tactic names (`Collection`, ...). |
 | `threat.tactic.reference[]` | `https://attack.mitre.org/tactics/...` |
+
+> In the pinned v19.2 taxonomy, `TA0005` is named **`Stealth`** (ATT&CK v19 renamed it from
+> "Defense Evasion") and `TA0112` **`Defense Impairment`** is a new tactic. Query
+> `threat.tactic.name` by those names - `threat.tactic.name:"Defense Evasion"` now matches nothing.
 
 Semantics that matter when you count things:
 
@@ -115,18 +119,22 @@ RedELK ships a compact dictionary at
 `elkserver/docker/redelk-base/redelkinstalldata/data/attack/enterprise-attack.json`, baked into the
 `redelk-base` image at `/opt/redelk/data/attack/`. It is technique id -> name, tactics, url,
 parent, and the deprecation/revocation state - a few hundred kilobytes instead of the ~50 MB
-official STIX bundle.
+official STIX bundle. It is pinned to ATT&CK Enterprise **v19.2**.
 
-Refresh it after a new ATT&CK release:
+Regenerate it from the pinned release:
 
 ```sh
 ./tools/generate_attack_dictionary.py
 ```
 
 It downloads the Enterprise bundle from `mitre-attack/attack-stix-data`, distills it, and only
-rewrites the file when the content actually changed - re-running produces no diff. Rebuild the
-`redelk-base` image (or set `elastic.build_local: true` and `./redelkctl install`) to ship the new
-dictionary.
+rewrites the file when the content actually changed - re-running produces no diff. The release is
+pinned, not floating: `generate_attack_dictionary.py`'s `DEFAULT_URL` names
+`enterprise-attack-19.2.json`, so bumping ATT&CK is a deliberate edit of that URL together with
+`EXPECTED_ATTACK_VERSION` / `CANONICAL_TACTICS` in
+`tests/test_attack_dictionary_tactics_canonical.py`, which guards the pinned tactic set. Rebuild
+the `redelk-base` image (or set `elastic.build_local: true` and `./redelkctl install`) to ship a
+regenerated dictionary.
 
 Override the location at runtime with `REDELK_ATTACK_DICT=/path/to/enterprise-attack.json`.
 Lookup order: the `dictionary` config key, `$REDELK_ATTACK_DICT`, `/opt/redelk/data/attack/`, then

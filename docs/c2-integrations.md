@@ -357,9 +357,18 @@ credentials are accepted.
 
 **What is collected**
 
-Implant lifecycle, tasks and their results, screenshots, downloads and credentials, into `rtops-*`
-/ `credentials-*` with `c2.program: outflankc2`, including the ATT&CK metadata Outflank C2 records
-on its commands.
+Implant lifecycle, tasks and their results, downloads and - when the build exposes them -
+screenshots and credentials, into `rtops-*` / `credentials-*` with `c2.program: outflankc2`. ATT&CK
+technique ids are added by the connector's command-name map (Outflank does not tag its own commands;
+see [ttp-tracking.md](ttp-tracking.md)).
+
+Downloaded files land in `/c2logs/<server>/outflankc2/downloads/` on the RedELK server, served
+by nginx exactly like the file-based C2s' `/c2logs`.
+
+An older Outflank Stage1 build exposes no `/api/tasks` endpoint: the connector then reads each
+implant's tasks embedded in its detail object (`/api/implants/<uid>`). Stage1 has no separate
+screenshots feed either - screenshots arrive through the downloads feed and are fetched to `/c2logs`
+like any other download.
 
 **Limitations**
 

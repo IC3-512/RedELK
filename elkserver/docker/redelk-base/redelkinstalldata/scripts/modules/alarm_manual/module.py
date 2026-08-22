@@ -6,7 +6,7 @@ Part of RedELK
 This check queries for C2 messages that contain "REDELK_ALARM" and will send an alarm with the
 content of that line.
 
-Only alarms when c2.log.type is: events or implant_input
+Only alarms when c2.log.type is: events, or an enrich_*-tagged implant_input / implant_task
 
 Authors:
 - Outflank B.V. / Marc Smeets (@MarcOverIp)
@@ -23,7 +23,7 @@ info = {
     "name": "Alarm manual module",
     "alarmmsg": "MANUAL ALARM RAISED FROM THE C2 CONSOLE",
     "description": (
-        'This check queries c2.message items (output and event log) that contain "REDELK_ALARM" '
+        'This check queries c2.message items (input, task or event log) that contain "REDELK_ALARM" '
         "and alarms the content of that line"
     ),
     "type": "redelk_alarm",
@@ -92,7 +92,7 @@ class Module:
         return messages
 
     def alarm_check(self, alarmed_messages):
-        """This check queries for C2 messages (input or eventlog) that contain 'REDELK_ALARM'"""
+        """This check queries for C2 messages (input, task or eventlog) that contain 'REDELK_ALARM'"""
         query = {
             "bool": {
                 "must": [

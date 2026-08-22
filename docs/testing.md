@@ -4,10 +4,10 @@ RedELK has two test tiers. They answer different questions, and only one of them
 
 | Tier | Command | Needs | Runs in CI |
 |---|---|---|---|
-| Fast | `python -m pytest tests` | Python only, seconds | Every push and pull request (`.github/workflows/python.yml`) |
+| Fast | `python -m pytest` | Python only, seconds | Every push and pull request (`.github/workflows/python.yml`) |
 | End-to-end | `pytest tests/e2e -m e2e` | Docker, root, ~6GB RAM, 20+ minutes | Nightly and on demand (`.github/workflows/e2e.yml`) |
 
-The e2e tier is opt-in through the `e2e` marker, so `pytest tests` stays fast and offline: items
+The e2e tier is opt-in through the `e2e` marker, so `python -m pytest` stays fast and offline: items
 carrying the marker are deselected unless you ask for them. It drives the stack through the
 project's own `./redelkctl`, which means an e2e run is also an installation test - not a separate
 container harness that could work while `redelkctl install` does not.
@@ -18,8 +18,12 @@ container harness that could work while `redelkctl install` does not.
 pip install pytest
 pip install -r tools/requirements.txt
 pip install -r elkserver/docker/redelk-base/redelkinstalldata/scripts/requirements.txt
-python -m pytest tests -q
+python -m pytest -q
 ```
+
+`testpaths` in `pyproject.toml` points pytest at both `tests/` and the connector suites
+that live next to the code under `modules/`, so a bare `python -m pytest` collects both;
+`.github/workflows/python.yml` runs the same two paths in CI.
 
 It covers the parts that are pure functions or pure data:
 

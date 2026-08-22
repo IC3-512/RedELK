@@ -203,3 +203,4 @@ elkserver/mounts/bloodhound-config/bloodhound.config.json
 elkserver/mounts/nginx-config/htpasswd.users.template
 elkserver/mounts/nginx-config/default.conf.template
 elkserver/docker-compose.override.yml
+uv.lock
