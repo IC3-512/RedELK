@@ -8,8 +8,8 @@
   "techniques": 365
  },
  "domain": "enterprise-attack",
- "generated": "2026-08-06T17:28:22Z",
- "source": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json",
+ "generated": "2026-08-22T20:31:24Z",
+ "source": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack-19.2.json",
  "version": "19.2",
  "techniques": {
   "T1001": {"deprecated": false, "is_subtechnique": false, "name": "Data Obfuscation", "parent": null, "revoked_by": null, "tactics": [{"id": "TA0011", "name": "Command and Control", "reference": "https://attack.mitre.org/tactics/TA0011/"}], "url": "https://attack.mitre.org/techniques/T1001/"},

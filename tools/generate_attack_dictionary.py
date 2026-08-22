@@ -37,10 +37,14 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The unversioned file in attack-stix-data always points at the latest Enterprise release.
+# Pinned to a specific Enterprise release for reproducibility. The unversioned
+# enterprise-attack.json floats to whatever is latest, which is how a v19 bundle - TA0005 renamed
+# "Stealth" and a new tactic TA0112 "Defense Impairment" - once landed silently. Bumping ATT&CK is
+# now a deliberate edit of this URL plus a matching update to CANONICAL_TACTICS in
+# tests/test_attack_dictionary_tactics_canonical.py, which guards the pinned tactic set.
 DEFAULT_URL = (
     "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/"
-    "enterprise-attack/enterprise-attack.json"
+    "enterprise-attack/enterprise-attack-19.2.json"
 )
 DEFAULT_OUTPUT = (
     REPO_ROOT
