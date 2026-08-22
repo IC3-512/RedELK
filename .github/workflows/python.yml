@@ -86,4 +86,4 @@ jobs:
         if: steps.suite.outputs.present == 'true'
         env:
           PYTHONPATH: ${{ github.workspace }}/tools
-        run: python -m pytest tests -q
+        run: python -m pytest tests elkserver/docker/redelk-base/redelkinstalldata/scripts/modules -q

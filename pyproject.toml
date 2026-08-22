@@ -10,7 +10,10 @@
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-testpaths = ["tests"]
+# The connector suites (e.g. modules/enrich_outflankc2/test_outflankc2.py) live next to the code
+# they guard, not under tests/. They must be collected too, or a connector regression can land
+# with CI green. Keep this list in sync with the pytest invocation in .github/workflows/python.yml.
+testpaths = ["tests", "elkserver/docker/redelk-base/redelkinstalldata/scripts/modules"]
 
 # `import redelk_setup` has to work without the caller exporting PYTHONPATH. The GitHub workflow
 # sets it too, so keep the two in sync if the layout ever changes.
