@@ -82,17 +82,23 @@ server {
         try_files $uri $uri/ =404;
         autoindex on;
 
+        # `.log` is not in mime.types, so nginx falls back to application/octet-stream and the
+        # browser downloads it instead of showing it. `default_type` supplies a fallback type
+        # ONLY for extensions mime.types does not already cover, so `.log` becomes text/plain
+        # while `.png`/`.jpg`/`.txt`/`.json` keep the image/png, image/jpeg, text/plain and
+        # application/json that mime.types derives. This is deliberately NOT a `types {}` block or
+        # `add_header Content-Type ...`: either of those would clobber or duplicate the image
+        # types and re-break ded7430. And with no `add_header` in this nested location, it keeps
+        # inheriting the server-level security headers (HSTS, X-Content-Type-Options: nosniff,
+        # X-Frame-Options, Referrer-Policy) rather than dropping all of them.
         location ~* \.(txt|log)$ {
-            add_header Content-Type text/plain;
-            add_header X-Content-Type-Options nosniff;
+            default_type text/plain;
         }
-        # No Content-Type override for images: nginx already derives image/png and image/jpeg
-        # from mime.types, and `add_header Content-Type ...` appends a second, wrong header
-        # rather than replacing the first - every screenshot was announced as image/jpeg,
-        # whatever it actually was.
-        location ~* \.json$ {
-            add_header Content-Type application/json;
-        }
+        # `.json` needs no handling of its own: mime.types already derives application/json.
+        # An `add_header Content-Type application/json` here would only append a second,
+        # conflicting header, and being an add_header in a nested location it would also strip the
+        # inherited server-level security headers - which is why the block that used to be here
+        # is gone rather than replaced.
     }
 
 {% if server.es_proxy %}
