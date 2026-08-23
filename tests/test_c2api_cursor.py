@@ -96,3 +96,33 @@ def test_reset_clears_one_object_type_only(cursor_module):
     assert cursor.position("task") == 0
     assert cursor.get_pending("task") == []
     assert cursor.position("callback") == 5
+
+
+def test_variants_survive_a_save_and_load(cursor_module):
+    """The selection set a Mythic's schema accepted is remembered across runs, so a server that
+    lacks a field RedELK asks for (credential.subtype on this Mythic) is probed once rather than on
+    every poll - each probe otherwise logs a schema error on the C2 and costs a round trip."""
+    es = cursor_module.es
+    cursor = cursor_module.Cursor("mythic", "mythic1")
+    cursor.positions = {"credential": 5}
+    cursor.variants = {"credential": 1, "task": 0}
+
+    assert cursor.save() is True
+    document = es.indexed[-1]["document"]
+    assert document["variants"] == {"credential": 1, "task": 0}
+
+    es.get_responses["mythic-mythic1"] = {"_source": document}
+    reloaded = cursor_module.Cursor.load("mythic", "mythic1")
+    assert reloaded.variants == {"credential": 1, "task": 0}
+    assert reloaded.position("credential") == 5
+
+
+def test_a_document_without_variants_loads_as_empty(cursor_module):
+    """Back-compat: a cursor written before variant persistence has no `variants` key, and must
+    load as an empty mapping rather than raising."""
+    es = cursor_module.es
+    es.get_responses["mythic-mythic1"] = {"_source": {"cursor": {"task": 3}, "pending": {}}}
+
+    cursor = cursor_module.Cursor.load("mythic", "mythic1")
+    assert cursor.variants == {}
+    assert cursor.position("task") == 3

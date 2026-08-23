@@ -10,10 +10,13 @@ layer is thrown away with it. A cursor file under /var/lib/redelk would mean tha
 already polled. Elasticsearch is the one piece of state the deployment already treats as
 persistent, so the cursor lives there: index `redelk-c2sync`, document id `<c2 type>-<server>`.
 
-The document holds two things:
+The document holds:
   * cursor - the highest object id seen per object type, so the next poll is `where id > cursor`.
   * pending - ids of objects that are not finished yet (a task still running, a file still
     uploading). Those have to be polled again even though their id is below the cursor.
+  * variants - which query selection-set each object type's schema accepted, so a Mythic that
+    lacks a field RedELK asks for is probed once rather than on every poll (each probe otherwise
+    logs a schema error on the C2 and costs a round trip).
 
 Authors:
 - RedELK contributors
@@ -41,6 +44,7 @@ class Cursor:
         self.doc_id = f"{c2_type}-{server}"
         self.positions: dict[str, int] = {}
         self.pending: dict[str, list[int]] = {}
+        self.variants: dict[str, int] = {}
         self.last_poll = None
 
     @classmethod
@@ -70,6 +74,9 @@ class Cursor:
                     cursor.pending[str(key)] = [
                         item for item in (coerce_int(value) for value in values) if item is not None
                     ]
+        variants = source.get("variants") or {}
+        if isinstance(variants, dict):
+            cursor.variants = {str(key): coerce_int(value, 0) for key, value in variants.items()}
         cursor.last_poll = parse_timestamp(source.get("last_poll"))
         return cursor
 
@@ -166,6 +173,7 @@ class Cursor:
             "c2": {"program": self.c2_type, "server": self.server},
             "cursor": self.positions,
             "pending": self.pending,
+            "variants": self.variants,
             "last_poll": now_iso(),
         }
         try:

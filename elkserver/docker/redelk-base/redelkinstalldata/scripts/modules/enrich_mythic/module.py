@@ -179,6 +179,12 @@ class MythicSync:
             timeout=HTTP_TIMEOUT,
             log=self.logger,
         )
+        # Reuse the selection set this server's schema accepted before, persisted in the cursor
+        # document. Without this the client relearns it every run: a Mythic that lacks a field a
+        # variant-0 query asks for (e.g. credential.subtype) fails that query and logs a schema
+        # error on every poll, instead of once. Shared by reference, so _fetch's updates to it ride
+        # out on cursor.save().
+        self.client.variants = cursor.variants
         if not self.client.authenticate():
             self._record("error", "could not authenticate to Mythic", 0)
             return 0
