@@ -1587,8 +1587,39 @@ def seed_redirector(
         )
         return _searchable()
 
+    def _alarmed() -> int:
+        elasticsearch.refresh("redirtraffic-*")
+        return elasticsearch.count(
+            "redirtraffic-*",
+            {
+                "bool": {
+                    "must": [
+                        {"term": {"host.name": redirector.name}},
+                        {"exists": {"field": "alarm.last_alarmed"}},
+                        {"wildcard": {"tags": "alarm_*"}},
+                    ]
+                }
+            },
+        )
+
     seed = RedirectorSeed(redirector.name, log_path, FILEBEAT_CONTAINER, _send)
     seed.send()
+
+    # test_every_panel_has_data checks the Alarms dashboard's redirector-side panels, which only
+    # fill once the alarm modules have run over the freshly-ingested traffic. Those run on the
+    # daemon's periodic alarm cycle - a beat behind ingest - so a single-shot dashboard check races
+    # the cycle and finds empty p01/p05/p07 (reliably so on a slow CI runner). The seed sends
+    # scanner traffic the redirector-side alarms fire on, so wait for the tag here instead.
+    wait_until(
+        lambda: _alarmed() > 0,
+        timeout=300,
+        message=(
+            f"a redirector-side alarm (alarm_httptraffic / alarm_useragent) to tag {redirector.name}'s "
+            "traffic in redirtraffic-*. The seed sends traffic those modules fire on; if this times "
+            "out the alarm cycle did not run - check './redelkctl logs redelk'."
+        ),
+        interval=3.0,
+    )
 
     yield seed
 
