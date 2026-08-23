@@ -288,14 +288,34 @@ class AttackTests(unittest.TestCase):
         self.assertIsNone(attack.technique_reference("not-a-technique"))
 
     def test_tactics_resolve_to_ids(self):
+        # A C2 still reporting the pre-v19 name "Defense Evasion" resolves to TA0005 and is
+        # relabelled to the pinned release's canonical name ("Stealth"), so it is neither dropped
+        # nor labelled differently from enrich_ttp on the same tactic id.
         threat = attack.build_threat(
             [{"id": "T1055.011", "name": "EWM Injection", "tactics": ["Defense Evasion"]}]
         )
         self.assertEqual(threat["framework"], "MITRE ATT&CK")
         self.assertEqual(threat["tactic"]["id"], ["TA0005"])
+        self.assertEqual(threat["tactic"]["name"], ["Stealth"])
         self.assertEqual(
             threat["tactic"]["reference"], ["https://attack.mitre.org/tactics/TA0005/"]
         )
+
+    def test_v19_tactic_names_resolve_to_ids(self):
+        # ATT&CK v19 (the pinned release) renamed TA0005 to "Stealth" and added TA0112 "Defense
+        # Impairment". Both must resolve to an id, or documents carrying those names drop out of any
+        # dashboard grouping on threat.tactic.id.
+        threat = attack.build_threat(
+            [
+                {
+                    "id": "T1112",
+                    "name": "Modify Registry",
+                    "tactics": ["Stealth", "Defense Impairment"],
+                }
+            ]
+        )
+        self.assertEqual(threat["tactic"]["id"], ["TA0005", "TA0112"])
+        self.assertEqual(threat["tactic"]["name"], ["Stealth", "Defense Impairment"])
 
     def test_unknown_tactic_is_kept_by_name(self):
         threat = attack.build_threat([{"id": "T1033", "name": "x", "tactics": ["Bikeshedding"]}])
@@ -441,9 +461,8 @@ class TaskTests(unittest.TestCase):
         # attack.tactic is a JSON array inside a string; both entries of the second technique
         # have to come out.
         self.assertEqual(threat["tactic"]["id"], ["TA0007", "TA0005", "TA0004"])
-        self.assertEqual(
-            threat["tactic"]["name"], ["Discovery", "Defense Evasion", "Privilege Escalation"]
-        )
+        # TA0005's name is the pinned release's canonical one - "Stealth" on ATT&CK v19.2.
+        self.assertEqual(threat["tactic"]["name"], ["Discovery", "Stealth", "Privilege Escalation"])
 
     def test_task_output_is_truncated(self):
         row = dict(TASK_ROW_DONE, stdout="x" * 5000)

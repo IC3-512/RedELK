@@ -15,6 +15,8 @@ Authors:
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from typing import Any, Iterable
 
@@ -22,18 +24,22 @@ FRAMEWORK = "MITRE ATT&CK"
 
 _TECHNIQUE_RE = re.compile(r"^T(\d{4})(?:\.(\d{3}))?$", re.IGNORECASE)
 
-# The enterprise tactics. Frameworks report tactics by name only (Mythic's attack.tactic is a
-# JSON array of names), while ECS threat.tactic.id wants the TAxxxx identifier and the dashboards
-# group on it. The list has been stable since ATT&CK v8 and is short enough to carry here rather
-# than requiring the full ATT&CK dictionary that enrich_ttp downloads.
-ENTERPRISE_TACTICS: dict[str, tuple[str, str]] = {
+# Frameworks report tactics by name only (Mythic's attack.tactic is a JSON array of names), while
+# ECS threat.tactic.id wants the TAxxxx identifier the dashboards group on. lookup_tactic() resolves
+# names/ids against the SAME shipped ATT&CK dictionary enrich_ttp uses (data/attack/enterprise-attack.json,
+# pinned by tools/generate_attack_dictionary.py), so both ingest paths agree on one taxonomy and a
+# re-pin to a different ATT&CK release is picked up automatically. The table below is only the
+# fallback used when that dictionary cannot be read - keep it matching the pinned release. Current
+# pin: Enterprise v19.2, where ATT&CK renamed TA0005 "Defense Evasion" to "Stealth" and added TA0112
+# "Defense Impairment".
+_FALLBACK_TACTICS: dict[str, tuple[str, str]] = {
     "reconnaissance": ("TA0043", "Reconnaissance"),
     "resource development": ("TA0042", "Resource Development"),
     "initial access": ("TA0001", "Initial Access"),
     "execution": ("TA0002", "Execution"),
     "persistence": ("TA0003", "Persistence"),
     "privilege escalation": ("TA0004", "Privilege Escalation"),
-    "defense evasion": ("TA0005", "Defense Evasion"),
+    "stealth": ("TA0005", "Stealth"),
     "credential access": ("TA0006", "Credential Access"),
     "discovery": ("TA0007", "Discovery"),
     "lateral movement": ("TA0008", "Lateral Movement"),
@@ -41,7 +47,32 @@ ENTERPRISE_TACTICS: dict[str, tuple[str, str]] = {
     "command and control": ("TA0011", "Command and Control"),
     "exfiltration": ("TA0010", "Exfiltration"),
     "impact": ("TA0040", "Impact"),
+    "defense impairment": ("TA0112", "Defense Impairment"),
 }
+# Kept for any importer that referenced the old name.
+ENTERPRISE_TACTICS = _FALLBACK_TACTICS
+_FALLBACK_BY_ID: dict[str, tuple[str, str]] = {
+    value[0]: value for value in _FALLBACK_TACTICS.values()
+}
+
+# Names a C2 may report that are not the pinned release's canonical name - typically the pre-rename
+# name of a renamed tactic. Resolved to the id, then relabelled to the canonical name, so one tactic
+# id never carries two names across ingest paths (build_threat here vs enrich_ttp on the dictionary).
+_TACTIC_ALIASES: dict[str, str] = {
+    "defense evasion": "TA0005",  # renamed "Stealth" in ATT&CK v19
+}
+
+# The shipped dictionary, same file (and search order) enrich_ttp uses. This file sits at
+# .../redelkinstalldata/scripts/modules/c2api/attack.py, four levels below redelkinstalldata.
+_DICT_NAME = "enterprise-attack.json"
+_INSTALL_DATA_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+_DICT_SEARCH_PATHS = [
+    os.path.join("/opt/redelk/data/attack", _DICT_NAME),
+    os.path.join(_INSTALL_DATA_DIR, "data", "attack", _DICT_NAME),
+]
+_TACTIC_INDEX_CACHE: dict[str, tuple[str, str]] | None = None
 
 
 def normalise_technique(value: Any) -> str | None:
@@ -71,17 +102,71 @@ def tactic_reference(tactic_id: str) -> str:
     return f"https://attack.mitre.org/tactics/{tactic_id}/"
 
 
-_TACTICS_BY_ID = {value[0]: value for value in ENTERPRISE_TACTICS.values()}
+def _normalise_tactic_key(name: Any) -> str:
+    return " ".join(str(name).strip().lower().replace("-", " ").replace("_", " ").split())
+
+
+def _tactic_index() -> dict[str, tuple[str, str]]:
+    """name/id -> (id, name), built once from the pinned ATT&CK dictionary so tactic resolution
+    tracks whatever release the dictionary is pinned to. Empty when the dictionary is unreadable, in
+    which case lookup_tactic falls back to _FALLBACK_TACTICS."""
+    global _TACTIC_INDEX_CACHE
+    if _TACTIC_INDEX_CACHE is not None:
+        return _TACTIC_INDEX_CACHE
+    index: dict[str, tuple[str, str]] = {}
+    candidates = []
+    env = os.environ.get("REDELK_ATTACK_DICT")
+    if env:
+        candidates.append(env)
+    candidates.extend(_DICT_SEARCH_PATHS)
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                techniques = json.load(handle).get("techniques") or {}
+        except (OSError, ValueError):
+            continue
+        for technique in techniques.values():
+            for tactic in technique.get("tactics") or []:
+                tid, tname = tactic.get("id"), tactic.get("name")
+                if not tid or not tname:
+                    continue
+                entry = (str(tid), str(tname))
+                index[str(tid).upper()] = entry
+                index[_normalise_tactic_key(tname)] = entry
+        break
+    _TACTIC_INDEX_CACHE = index
+    return index
 
 
 def lookup_tactic(name: Any) -> tuple[str, str] | None:
-    """Resolve a tactic name ('Defense Evasion', 'defense-evasion', 'TA0005') to (id, name)."""
+    """Resolve a tactic name or id ('Stealth', 'defense-evasion', 'TA0005') to (id, name).
+
+    Resolution follows the pinned ATT&CK dictionary (so the pinned release's canonical names win and
+    a re-pin is picked up for free), falls back to the built-in table when the dictionary is
+    unreadable, and understands the pre-rename name of a renamed tactic ('Defense Evasion' -> TA0005
+    'Stealth') so a C2 still reporting the old name is neither dropped nor labelled inconsistently.
+    """
     if name is None:
         return None
-    key = " ".join(str(name).strip().lower().replace("-", " ").replace("_", " ").split())
+    key = _normalise_tactic_key(name)
     if not key:
         return None
-    return _TACTICS_BY_ID.get(key.upper()) or ENTERPRISE_TACTICS.get(key)
+    index = _tactic_index()
+
+    def resolve(candidate: str) -> tuple[str, str] | None:
+        if not candidate:
+            return None
+        upper = candidate.upper()
+        return (
+            index.get(candidate)
+            or index.get(upper)
+            or _FALLBACK_TACTICS.get(candidate)
+            or _FALLBACK_BY_ID.get(upper)
+        )
+
+    return resolve(key) or resolve(_TACTIC_ALIASES.get(key, ""))
 
 
 def build_threat(entries: Iterable[dict]) -> dict:

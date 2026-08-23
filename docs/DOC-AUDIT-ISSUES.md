@@ -4,19 +4,17 @@ Real issues found while auditing/updating documentation (agent pass + 2 verifier
 **Recorded, not fixed** here — fixing is code work, tracked separately. Doc-adjacent fixes made in
 the same pass are noted at the end.
 
-## ATT&CK v19.2 fallout (most important)
-- `.../scripts/modules/c2api/attack.py:36` — `ENTERPRISE_TACTICS` hardcodes `("TA0005", "Defense
-  Evasion")` and has no `TA0112 "Defense Impairment"`; the comment claims the list is "stable since
-  ATT&CK v8". The dictionary is now pinned to Enterprise **v19.2**, where MITRE renamed TA0005 to
-  "Stealth" and added TA0112. `build_threat` (the path the API connectors `enrich_mythic` /
-  `enrich_outflankc2` use when a C2 supplies a tactic *name*) therefore writes
-  `threat.tactic.name: "Defense Evasion"` for TA0005, while `enrich_ttp` writes "Stealth" from the
-  v19.2 dictionary for Cobalt-Strike/etc. documents in the **same `rtops-*` index** — so a dashboard
-  grouping on `threat.tactic.name` shows two names for one id. Decide deliberately: update the table
-  to v19.2, or keep the classic names on purpose (most C2s still emit them) and fix the comment.
-- `.../c2api/attack.py:117-124` — `build_threat`'s unknown-tactic branch keeps a v19 tactic *name*
-  it cannot resolve ("Stealth" / "Defense Impairment") in `threat.tactic.name` but emits **no**
-  `threat.tactic.id`, so those documents drop out of any dashboard grouped on `threat.tactic.id`.
+## ATT&CK v19.2 fallout — FIXED
+- `c2api/attack.py` — `lookup_tactic` now resolves tactic names/ids against the **same pinned
+  `enterprise-attack.json`** `enrich_ttp` uses (built into a memoised index), so both ingest paths
+  agree on one taxonomy and a re-pin to another ATT&CK release is picked up automatically. The
+  built-in table is now the v19.2 fallback (used only when the dictionary is unreadable), and a small
+  alias table maps the pre-rename name (`"Defense Evasion"` -> `TA0005`, relabelled to the canonical
+  `"Stealth"`). This closes both prior issues: (a) `TA0005` no longer showed two names across paths,
+  and (b) the v19 names `"Stealth"` / `"Defense Impairment"` (and `TA0112`) now resolve to ids
+  instead of being kept name-only and dropping out of `threat.tactic.id` dashboards. Covered by
+  `enrich_mythic/test_mythic.py::test_v19_tactic_names_resolve_to_ids` and the updated
+  `test_tactics_resolve_to_ids` / `test_attack_fields`.
 
 ## Latent bug
 - `.../modules/enrich_outflankc2/client.py:257` `fetch_file` — writes a download with
