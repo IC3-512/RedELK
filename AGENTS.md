@@ -72,3 +72,9 @@ so "set the ATT&CK version" = re-pin the generator's URL, regenerate, and update
 ## Known open issues
 Real bugs found but not yet fixed are logged in [docs/DOC-AUDIT-ISSUES.md](docs/DOC-AUDIT-ISSUES.md)
 — check it before assuming something is a new regression.
+
+## Commit trailers
+`Co-Authored-By` yes, session URLs never — this fork's history was rewritten once to
+strip them. The fork is also pinned downstream by exact commit hash (c2rbo
+`src/templates/redelk.auto.tfvars`), so rewriting already-pushed history forces a
+matching re-pin there; don't rewrite published history without doing both.
