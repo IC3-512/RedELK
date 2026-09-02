@@ -1430,7 +1430,10 @@ def haproxy_lines(
     for index, line in enumerate(lines):
         when = start + step * index
         syslog = when.strftime("%b %e %H:%M:%S")
-        gmt = when.strftime("%d/%b/%Y:%H:%M:%S %z")
+        gmt = (
+            f"{when.strftime('%d/%b/%Y:%H:%M:%S')}.{when.microsecond // 1000:03d} "
+            f"{when.strftime('%z')}"
+        )
 
         _, separator, tail = line.partition(" haproxy")
         if not separator:
@@ -1439,8 +1442,8 @@ def haproxy_lines(
             continue
 
         rewritten = f"{syslog} {hostname}{separator}{tail}"
-        # The field is "GMT:03/Apr/2020:04:29:45 +0000" - date and offset, separated by a space,
-        # so it cannot be replaced by cutting at the first space after the marker.
+        # The field is "GMT:03/Apr/2020:04:29:45.123 +0000" - date and offset, separated by a
+        # space, so it cannot be replaced by cutting at the first space after the marker.
         rewritten = re.sub(r"GMT:\S+ [+-]\d{4}", f"GMT:{gmt}", rewritten, count=1)
         stamped.append(rewritten)
     return stamped

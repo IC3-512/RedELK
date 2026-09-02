@@ -126,6 +126,9 @@ every shipper must be re-provisioned because Logstash now requires a client cert
 
 ### Fixed
 
+- **HAProxy redirector timestamps and request methods.** Traffic lines carrying both milliseconds
+  and a UTC offset no longer receive `_dateparsefailure`, and the leading method in the retained
+  request line is now exposed as `http.request.method` for reporting and detection queries.
 - **Mythic 4.0 column renames.** The connector selected `response`, `credential` and `artifact`,
   which Mythic 4.0 renamed to `<name>_text` / `<name>_raw`. GraphQL rejects the whole query on one
   unknown field, so responses, credentials and artefacts were not ingested at all from a v4 server.

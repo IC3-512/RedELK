@@ -92,7 +92,7 @@ def haproxy_line(hostname: str, useragent: str, backend: str = ROGUE_BACKEND) ->
     """
     now = datetime.datetime.now(datetime.timezone.utc)
     syslog = now.strftime("%b %e %H:%M:%S")
-    gmt = now.strftime("%d/%b/%Y:%H:%M:%S %z")
+    gmt = f"{now.strftime('%d/%b/%Y:%H:%M:%S')}.{now.microsecond // 1000:03d} {now.strftime('%z')}"
     headers = f"{useragent}|c2.example.com|||||"
     return (
         f"{syslog} {hostname} haproxy[7059]: "
@@ -163,6 +163,7 @@ def test_traffic_arrives_over_mutual_tls(elasticsearch, redelk_lab, seed_redirec
     [
         "source.ip",
         "redir.backend.name",
+        "http.request.method",
         "http.headers.useragent",
         # Added by the geoip filter from source.ip, and read by the redirector traffic map. Needs
         # Logstash's GeoIP database and a routable address in the sample - see docs/testing.md.
@@ -203,6 +204,17 @@ def test_host_name_is_a_single_value(elasticsearch, seed_redirector):
             f"host.name is an array: {host_name!r} - the grok filter is appending to the value "
             "Filebeat already set"
         )
+
+
+def test_haproxy_timestamp_with_milliseconds_and_offset_is_parsed(elasticsearch, seed_redirector):
+    """The deployed HAProxy format must set event time without `_dateparsefailure`."""
+    elasticsearch.refresh(INDEX)
+    sources = documents(elasticsearch, scoped(seed_redirector))
+    failed = [source for source in sources if "_dateparsefailure" in (source.get("tags") or [])]
+    assert not failed, (
+        f"{len(failed)} of {len(sources)} redirector documents failed timestamp parsing; "
+        f"example redir.timestamp={value(failed[0], 'redir.timestamp')!r}"
+    )
 
 
 # --------------------------------------------------------------------------------------------
