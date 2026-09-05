@@ -560,12 +560,20 @@ class Module:
             self.logger.debug("probe of %s returned HTTP %s", probe, status)
 
         state.update({"path": "", "available": False, "checked": now_iso()})
-        self.logger.info(
-            "this Outflank C2 build does not expose %s; %s tracking is disabled (tried: %s)",
-            tried[0] if tried else kind,
-            kind,
-            ", ".join(tried) or "nothing, no implants to probe with",
-        )
+        tried_text = ", ".join(tried) or "nothing, no implants to probe with"
+        if kind == "tasks":
+            self.logger.info(
+                "this Outflank C2 build has no standalone tasks endpoint; checking the "
+                "per-implant detail fallback (tried: %s)",
+                tried_text,
+            )
+        else:
+            self.logger.info(
+                "this Outflank C2 build does not expose %s; %s tracking is disabled (tried: %s)",
+                tried[0] if tried else kind,
+                kind,
+                tried_text,
+            )
         return ""
 
     # ----------------------------------------------------------------------------------------

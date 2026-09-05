@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import io
 import json
 import logging
 import os
@@ -648,11 +649,16 @@ def test_fetch_file_hashes_and_enforces_the_size_limit():
 
     with tempfile.TemporaryDirectory() as tmp:
         destination = os.path.join(tmp, "sub", "D0001_secrets.docx")
-        result = client.fetch_file("/api/downloads/D0001", destination, max_size=1048576)
+        previous_umask = os.umask(0o077)
+        try:
+            result = client.fetch_file("/api/downloads/D0001", destination, max_size=1048576)
+        finally:
+            os.umask(previous_umask)
         assert result["size"] == 5000
         assert result["sha256"] == hashlib.sha256(body).hexdigest()
         assert result["md5"] == hashlib.md5(body).hexdigest()
         assert os.path.getsize(destination) == 5000
+        assert os.stat(destination).st_mode & 0o777 == 0o644
         assert not os.path.exists(destination + ".part")
 
         # Too large: nothing is left behind for nginx to serve.
@@ -698,6 +704,24 @@ def test_missing_endpoint_is_probed_once_and_then_left_alone():
     # The next poll re-uses what the cursor remembers instead of asking again.
     assert module.resolve_endpoint("tasks", client, cursor, IMPLANTS) == ""
     assert len(client.probes) == 3
+
+
+def test_missing_tasks_endpoint_does_not_claim_the_fallback_is_disabled():
+    module = oc2.Module()
+    client = FakeProbeClient()
+    cursor = {"server": "oc2"}
+    output = io.StringIO()
+    handler = logging.StreamHandler(output)
+    module.logger.addHandler(handler)
+    module.logger.setLevel(logging.INFO)
+    try:
+        assert module.resolve_endpoint("tasks", client, cursor, IMPLANTS) == ""
+    finally:
+        module.logger.removeHandler(handler)
+
+    message = output.getvalue()
+    assert "checking the per-implant detail fallback" in message
+    assert "tracking is disabled" not in message
 
 
 def test_a_web_ui_answering_200_is_not_mistaken_for_an_endpoint():

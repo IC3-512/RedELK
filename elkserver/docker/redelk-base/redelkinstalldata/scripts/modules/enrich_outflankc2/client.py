@@ -42,6 +42,7 @@ from typing import Any
 
 import requests
 import urllib3
+from modules.c2api.util import FILE_MODE
 
 # Same value as modules.helpers.HTTP_TIMEOUT. It is repeated instead of imported because helpers
 # builds an Elasticsearch client at import time, and this file has to stay usable without one.
@@ -298,6 +299,9 @@ class OutflankC2Client:
                     handle.write(chunk)
                     for digest in digests.values():
                         digest.update(chunk)
+            # The destination is served by nginx. A restrictive daemon umask otherwise leaves
+            # this file at 0600 and the download exists but consistently answers HTTP 403.
+            os.chmod(partial, FILE_MODE)
             os.replace(partial, destination)
         except _TooLarge:
             _remove(partial)

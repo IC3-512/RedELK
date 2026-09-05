@@ -113,22 +113,37 @@ def request(
 ) -> requests.Response:
     """Make a request and fail loudly on an unexpected HTTP status.
 
-    A 502/503/504 is retried instead of raised. It does not mean "this request is wrong", it means
-    the service is up but something it depends on is not ready yet, which during provisioning is a
-    matter of seconds - and treating it as fatal is what turned a transient Kibana licensing gap
-    into a deployment with no dashboards at all.
+    A transport failure or 502/503/504 is retried instead of raised. Neither means "this request is
+    wrong"; during provisioning they normally mean that Elasticsearch or Kibana is up but still
+    settling. Treating a read timeout as fatal left the base container alive but permanently
+    unprovisioned on a real two-vCPU deployment.
 
     Because of that, any body passed in `files` or `data` has to be replayable: bytes, not an open
     file handle, which a retry would resend as an empty body.
     """
     kwargs.setdefault("timeout", TIMEOUT)
     label = description or f"{method} {url}"
-    deadline = time.time() + RETRY_TIMEOUT
+    deadline = time.monotonic() + RETRY_TIMEOUT
     while True:
-        response = session.request(method, url, **kwargs)
+        try:
+            response = session.request(method, url, **kwargs)
+        except requests.RequestException as error:
+            if time.monotonic() >= deadline:
+                raise ProvisioningError(
+                    f"{label} failed after transient transport errors: "
+                    f"{type(error).__name__}: {error}"
+                ) from error
+            logger.info(
+                "%s: %s, retrying in %ss",
+                label,
+                type(error).__name__,
+                RETRY_INTERVAL,
+            )
+            time.sleep(RETRY_INTERVAL)
+            continue
         if response.status_code in expect:
             return response
-        if response.status_code not in TRANSIENT_STATUS or time.time() >= deadline:
+        if response.status_code not in TRANSIENT_STATUS or time.monotonic() >= deadline:
             raise ProvisioningError(
                 f"{label} failed: HTTP {response.status_code} {response.text[:500]}"
             )
@@ -139,9 +154,9 @@ def request(
 def wait_for(
     session: requests.Session, url: str, label: str, check, headers: dict | None = None
 ) -> None:
-    deadline = time.time() + WAIT_TIMEOUT
+    deadline = time.monotonic() + WAIT_TIMEOUT
     last_error = ""
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         try:
             response = session.get(url, timeout=10, headers=headers)
             if check(response):

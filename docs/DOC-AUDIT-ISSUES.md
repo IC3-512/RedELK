@@ -1,8 +1,8 @@
 # Doc-audit issues (RedELK)
 
 Real issues found while auditing/updating documentation (agent pass + 2 verifiers per lane).
-**Recorded, not fixed** here — fixing is code work, tracked separately. Doc-adjacent fixes made in
-the same pass are noted at the end.
+This is now a resolution ledger: every item below has a matching implementation or documentation
+change and a regression test where behavior changed.
 
 ## ATT&CK v19.2 fallout — FIXED
 - `c2api/attack.py` — `lookup_tactic` now resolves tactic names/ids against the **same pinned
@@ -16,23 +16,19 @@ the same pass are noted at the end.
   `enrich_mythic/test_mythic.py::test_v19_tactic_names_resolve_to_ids` and the updated
   `test_tactics_resolve_to_ids` / `test_attack_fields`.
 
-## Latent bug
-- `.../modules/enrich_outflankc2/client.py:257` `fetch_file` — writes a download with
-  `open(part,'wb')` + `os.replace(...)` and **no `chmod`**, so the served file's mode follows the
-  process umask. The store's invariant is `0644` (`c2api/files.py` chmods to `FILE_MODE`;
-  `c2api/util.py`/`http.py` note web-root files unreadable by nginx return 403). Under a restrictive
-  umask, nginx can 403 a download even though the docs say it is "served by nginx". (This is why the
-  `c2-integrations.md` download note deliberately does not assert a mode.)
+## Runtime findings — FIXED
 
-## Misleading log / cosmetic
-- `.../modules/enrich_outflankc2/module.py:562-567` — `resolve_endpoint` emits INFO
-  "this Outflank C2 build does not expose tasks; tasks tracking is disabled" and sets
-  `available=False` *before* `collect_tasks` reaches the embedded fallback. On a working Stage1 build
-  the log reads "tasks tracking is disabled" immediately followed by "embeds tasks in the implant
-  detail…" — someone debugging "why no tasks?" may stop at the first line even though tasks are being
-  ingested. Fires only on the first probe / daily re-probe, not every poll.
-- `.../c2api/http.py:43-44` — orphaned comment about the file-mode constant that moved to `util.py`;
-  now sits above the unrelated `MAX_REDIRECTS`.
+- Outflank C2 downloads are explicitly changed to shared `FILE_MODE` (`0644`) before their atomic
+  rename, so a restrictive daemon umask cannot leave nginx returning 403. The connector test now
+  asserts the final mode.
+- A missing standalone tasks endpoint now says the connector is checking the per-implant fallback;
+  it no longer claims task tracking is disabled immediately before ingesting embedded Stage1 tasks.
+- The orphaned file-mode comment above `MAX_REDIRECTS` was removed.
+- Bootstrap requests retry bounded transport/read failures as well as HTTP 502/503/504. The base
+  entrypoint starts neither cron nor the daemon until Elasticsearch and Kibana provisioning exits
+  successfully; failure exits the container so Docker's restart policy reruns the idempotent
+  bootstrap. Unit tests, a fresh two-CPU/8-GiB install, an idempotent restart, and a forced-failure
+  restart-policy probe cover the recovery behavior.
 
 ## Fixed in this pass
 - `docs/c2-integrations.md`, `docs/ttp-tracking.md` — corrected the Outflank ATT&CK source: technique

@@ -44,7 +44,10 @@ class FakeSession:
         self.calls.append((method, url, kwargs))
         if callable(self.script):
             return self.script(method, url, kwargs)
-        return self.script.pop(0)
+        outcome = self.script.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
 
     def get(self, url: str, **kwargs) -> FakeResponse:
         return self.request("GET", url, **kwargs)
@@ -68,6 +71,34 @@ def test_a_503_is_retried_rather_than_ending_provisioning(monkeypatch):
 
     assert response.status_code == 200
     assert len(session.calls) == 2, "the 503 should have been retried, not raised"
+
+
+def test_a_read_timeout_is_retried_rather_than_ending_provisioning(monkeypatch):
+    """ES can pass its health check and still stall while the security index settles."""
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+    session = FakeSession(
+        [bootstrap.requests.ReadTimeout("security index is still starting"), FakeResponse(200)]
+    )
+
+    response = bootstrap.request(
+        session,
+        "POST",
+        "https://elasticsearch/_security/user/kibana_system/_password",
+        description="setting the kibana_system password",
+    )
+
+    assert response.status_code == 200
+    assert len(session.calls) == 2, "the timed-out password request should have been retried"
+
+
+def test_transport_errors_remain_bounded_and_actionable(monkeypatch):
+    monkeypatch.setattr(bootstrap, "RETRY_TIMEOUT", 0)
+    session = FakeSession([bootstrap.requests.ConnectionError("connection reset")])
+
+    with pytest.raises(bootstrap.ProvisioningError, match="ConnectionError: connection reset"):
+        bootstrap.request(session, "PUT", "https://elasticsearch/_index_template/redelk")
+
+    assert len(session.calls) == 1
 
 
 def test_a_client_error_is_not_retried(monkeypatch):

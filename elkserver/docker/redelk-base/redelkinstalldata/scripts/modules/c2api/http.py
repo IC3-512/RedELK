@@ -40,9 +40,6 @@ DEFAULT_TIMEOUT = 30
 # the size limit is enforced long before the file is in memory.
 CHUNK_SIZE = 64 * 1024
 
-# Downloaded files land in the nginx web root and exist to be served from it, so they have to be
-# readable by the nginx worker. They are already behind the server's basic auth.
-
 # Redirects are followed by hand (see ApiClient.request), so they need their own bound.
 MAX_REDIRECTS = 5
 

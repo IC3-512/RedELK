@@ -35,13 +35,17 @@ STATE_DIR = Path("/var/lib/redelk")
 # bootstrap.py's ES_MARKER (and the Dockerfile / compose healthchecks that test -f it).
 ES_MARKER = STATE_DIR / "es-provisioned"
 
-# The daemon is held until Elasticsearch provisioning has produced ES_MARKER; these bound that
-# wait. The absolute cap is only a backstop against a wedged bootstrap process - in practice the
-# marker appears, or the bootstrap process exits, long before it fires. It is set above
-# bootstrap.py's own REDELK_WAIT_TIMEOUT so bootstrap gives up (and its process exits, which we
-# detect directly) before this cap is reached.
+# The daemon and cron are held until all provisioning has completed. Elasticsearch and Kibana can
+# each consume REDELK_WAIT_TIMEOUT, so the supervisor's backstop must cover both waits plus the API
+# writes between them. REDELK_PROVISION_TIMEOUT is independently overridable for unusually slow
+# systems, while every normal dependency wait remains bounded inside bootstrap.py.
 PROVISION_POLL_INTERVAL = 2
-PROVISION_WAIT_TIMEOUT = int(os.environ.get("REDELK_WAIT_TIMEOUT", "900")) + 300
+PROVISION_WAIT_TIMEOUT = int(
+    os.environ.get(
+        "REDELK_PROVISION_TIMEOUT",
+        str(2 * int(os.environ.get("REDELK_WAIT_TIMEOUT", "900")) + 300),
+    )
+)
 
 
 def _uid_gid() -> tuple[int, int]:
@@ -128,8 +132,8 @@ def start_cron() -> subprocess.Popen | None:
         return None
 
 
-def wait_for_es_provisioning(bootstrap: subprocess.Popen) -> None:
-    """Hold the daemon until Elasticsearch provisioning has created the managed indices.
+def wait_for_provisioning(bootstrap: subprocess.Popen) -> int:
+    """Wait for bootstrap to finish and return the exit code the container should use.
 
     The daemon's first pass writes redelk-modules with es.index(), which auto-creates the index
     with whatever mapping Elasticsearch infers from that first document (text) if the index does
@@ -140,56 +144,57 @@ def wait_for_es_provisioning(bootstrap: subprocess.Popen) -> None:
     exec; if the daemon wins that race the dashboard breaks permanently. So do not exec the daemon
     until Elasticsearch provisioning has finished.
 
-    ES_MARKER is written at the very end of provision_elasticsearch(), strictly after
-    create_managed_indices(), so its presence means redelk-modules already exists with its template
-    mapping. On a fresh boot it is absent and we wait for it to appear; on a restart it is already
-    present (the index already exists correctly) and we return at once, so a normal restart is not
-    delayed. Kibana provisioning runs after the marker is written, in this same background process,
-    so gating on the marker leaves it running concurrently with the daemon - provision_kibana is
-    unchanged.
+    ES_MARKER is written at the end of Elasticsearch provisioning, strictly after
+    create_managed_indices(). It also makes the container healthy so Compose can start Kibana,
+    which bootstrap provisions next. Waiting for the *process*, rather than returning as soon as
+    the marker appears, means a failed Kibana import also exits the container and is retried by
+    Docker's restart policy.
 
-    We stop waiting if the bootstrap process exits before writing the marker (Elasticsearch
-    provisioning failed): the daemon needs Elasticsearch too and will fail and be restarted by
-    docker, so there is nothing to gain by holding it, and holding it forever would wedge the
-    container. The absolute cap is a final backstop against a wedged bootstrap process.
+    Starting the daemon after bootstrap failed was actively unsafe: the daemon kept PID 1 alive,
+    so ``restart: always`` never retried provisioning, while its writes could create indices before
+    their templates existed. A non-zero bootstrap result must therefore become a non-zero container
+    result. Docker then reruns this idempotent bootstrap from the beginning.
     """
-    if ES_MARKER.is_file():
-        return
-
-    logger.info("waiting for Elasticsearch provisioning to create the managed indices")
+    logger.info("waiting for Elasticsearch and Kibana provisioning to complete")
     deadline = time.monotonic() + PROVISION_WAIT_TIMEOUT
     while True:
-        if ES_MARKER.is_file():
-            logger.info("Elasticsearch provisioning complete; starting the daemon")
-            return
-        if bootstrap.poll() is not None:
-            logger.error(
-                "provisioning exited (code %s) before Elasticsearch was ready; starting the "
-                "daemon anyway. The daemon needs Elasticsearch and will be restarted by docker "
-                "if it keeps failing; if Elasticsearch is in fact reachable, redelk-modules may "
-                "be auto-created with an inferred mapping until provisioning succeeds.",
-                bootstrap.returncode,
+        returncode = bootstrap.poll()
+        if returncode is not None:
+            if returncode == 0 and ES_MARKER.is_file():
+                logger.info("provisioning complete; starting RedELK services")
+                return 0
+            reason = (
+                "without creating the Elasticsearch marker"
+                if returncode == 0
+                else "before provisioning completed"
             )
-            return
+            logger.error(
+                "provisioning exited (code %s) %s; exiting so Docker can retry it",
+                returncode,
+                reason,
+            )
+            return returncode or 1
         if time.monotonic() >= deadline:
             logger.error(
-                "Elasticsearch provisioning did not finish within %ss; starting the daemon anyway",
+                "provisioning did not finish within %ss; exiting so Docker can retry it",
                 PROVISION_WAIT_TIMEOUT,
             )
-            return
+            return 1
         time.sleep(PROVISION_POLL_INTERVAL)
 
 
 def main() -> int:
     fix_permissions()
     bootstrap = start_bootstrap()
+
+    # Block here so no scheduled job can write before the templates and managed indices exist.
+    # A failed bootstrap exits the container; restart: always then runs the idempotent provisioning
+    # again instead of leaving a permanently unhealthy container with a busy, failing daemon.
+    provision_result = wait_for_provisioning(bootstrap)
+    if provision_result != 0:
+        return provision_result
+
     start_cron()
-
-    # Block here so the daemon's first es.index("redelk-modules") happens strictly after
-    # create_managed_indices() - otherwise the two race and the daemon can create the index with
-    # the wrong (inferred text) mapping, which breaks the Health dashboard permanently.
-    wait_for_es_provisioning(bootstrap)
-
     logger.info("starting the RedELK daemon")
     # The daemon becomes the long-running foreground process, so if it dies the container dies and
     # docker restarts it. Under cron a crashed daemon left a healthy-looking container that had
