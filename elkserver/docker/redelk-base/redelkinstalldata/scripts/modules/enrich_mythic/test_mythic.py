@@ -300,6 +300,15 @@ class AttackTests(unittest.TestCase):
         self.assertEqual(
             threat["tactic"]["reference"], ["https://attack.mitre.org/tactics/TA0005/"]
         )
+        self.assertEqual(threat["technique"]["id"], ["T1055.011", "T1055"])
+        self.assertEqual(
+            threat["technique"]["subtechnique"],
+            {
+                "id": ["T1055.011"],
+                "name": ["EWM Injection"],
+                "reference": ["https://attack.mitre.org/techniques/T1055/011/"],
+            },
+        )
 
     def test_v19_tactic_names_resolve_to_ids(self):
         # ATT&CK v19 (the pinned release) renamed TA0005 to "Stealth" and added TA0112 "Defense
@@ -446,17 +455,26 @@ class TaskTests(unittest.TestCase):
     def test_attack_fields(self):
         threat = convert.task_documents(TASK_ROW_DONE, CTX)[0].source["threat"]
         self.assertEqual(threat["framework"], "MITRE ATT&CK")
-        self.assertEqual(threat["technique"]["id"], ["T1033", "T1055.011"])
+        self.assertEqual(threat["technique"]["id"], ["T1033", "T1055.011", "T1055"])
         self.assertEqual(
             threat["technique"]["name"],
-            ["System Owner/User Discovery", "Extra Window Memory Injection"],
+            ["System Owner/User Discovery", "Extra Window Memory Injection", "Process Injection"],
         )
         self.assertEqual(
             threat["technique"]["reference"],
             [
                 "https://attack.mitre.org/techniques/T1033/",
                 "https://attack.mitre.org/techniques/T1055/011/",
+                "https://attack.mitre.org/techniques/T1055/",
             ],
+        )
+        self.assertEqual(
+            threat["technique"]["subtechnique"],
+            {
+                "id": ["T1055.011"],
+                "name": ["Extra Window Memory Injection"],
+                "reference": ["https://attack.mitre.org/techniques/T1055/011/"],
+            },
         )
         # attack.tactic is a JSON array inside a string; both entries of the second technique
         # have to come out.

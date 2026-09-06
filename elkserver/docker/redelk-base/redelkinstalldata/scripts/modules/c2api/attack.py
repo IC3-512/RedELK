@@ -4,10 +4,10 @@ Part of RedELK
 
 Builds the ECS threat.* block from the MITRE ATT&CK data a C2 framework attaches to a task.
 
-This is the "the C2 already told us the technique name" path. enrich_ttp does the much richer
-job of resolving bare technique ids against a full ATT&CK dictionary (revocations, deprecations,
-sub-technique parents); it only looks at documents that have threat.technique.id but no
-threat.technique.name, so a document completed here is left alone by it.
+This is the "the C2 already told us the technique name" path. enrich_ttp does the richer job of
+resolving bare technique ids against the full ATT&CK dictionary (including revocations and
+deprecations). This module still records sub-techniques and their parent immediately, because
+enrich_ttp intentionally leaves a document with C2-supplied technique names alone.
 
 Authors:
 - RedELK contributors
@@ -73,6 +73,7 @@ _DICT_SEARCH_PATHS = [
     os.path.join(_INSTALL_DATA_DIR, "data", "attack", _DICT_NAME),
 ]
 _TACTIC_INDEX_CACHE: dict[str, tuple[str, str]] | None = None
+_TECHNIQUE_INDEX_CACHE: dict[str, dict[str, Any]] | None = None
 
 
 def normalise_technique(value: Any) -> str | None:
@@ -106,14 +107,13 @@ def _normalise_tactic_key(name: Any) -> str:
     return " ".join(str(name).strip().lower().replace("-", " ").replace("_", " ").split())
 
 
-def _tactic_index() -> dict[str, tuple[str, str]]:
-    """name/id -> (id, name), built once from the pinned ATT&CK dictionary so tactic resolution
-    tracks whatever release the dictionary is pinned to. Empty when the dictionary is unreadable, in
-    which case lookup_tactic falls back to _FALLBACK_TACTICS."""
-    global _TACTIC_INDEX_CACHE
-    if _TACTIC_INDEX_CACHE is not None:
-        return _TACTIC_INDEX_CACHE
-    index: dict[str, tuple[str, str]] = {}
+def _technique_index() -> dict[str, dict[str, Any]]:
+    """Technique id -> dictionary entry, parsed once from the pinned ATT&CK data."""
+    global _TECHNIQUE_INDEX_CACHE
+    if _TECHNIQUE_INDEX_CACHE is not None:
+        return _TECHNIQUE_INDEX_CACHE
+
+    index: dict[str, dict[str, Any]] = {}
     candidates = []
     env = os.environ.get("REDELK_ATTACK_DICT")
     if env:
@@ -127,15 +127,32 @@ def _tactic_index() -> dict[str, tuple[str, str]]:
                 techniques = json.load(handle).get("techniques") or {}
         except (OSError, ValueError):
             continue
-        for technique in techniques.values():
-            for tactic in technique.get("tactics") or []:
-                tid, tname = tactic.get("id"), tactic.get("name")
-                if not tid or not tname:
-                    continue
-                entry = (str(tid), str(tname))
-                index[str(tid).upper()] = entry
-                index[_normalise_tactic_key(tname)] = entry
+        index = {
+            str(technique_id).upper(): technique
+            for technique_id, technique in techniques.items()
+            if isinstance(technique, dict)
+        }
         break
+    _TECHNIQUE_INDEX_CACHE = index
+    return index
+
+
+def _tactic_index() -> dict[str, tuple[str, str]]:
+    """name/id -> (id, name), built once from the pinned ATT&CK dictionary so tactic resolution
+    tracks whatever release the dictionary is pinned to. Empty when the dictionary is unreadable, in
+    which case lookup_tactic falls back to _FALLBACK_TACTICS."""
+    global _TACTIC_INDEX_CACHE
+    if _TACTIC_INDEX_CACHE is not None:
+        return _TACTIC_INDEX_CACHE
+    index: dict[str, tuple[str, str]] = {}
+    for technique in _technique_index().values():
+        for tactic in technique.get("tactics") or []:
+            tid, tname = tactic.get("id"), tactic.get("name")
+            if not tid or not tname:
+                continue
+            entry = (str(tid), str(tname))
+            index[str(tid).upper()] = entry
+            index[_normalise_tactic_key(tname)] = entry
     _TACTIC_INDEX_CACHE = index
     return index
 
@@ -178,9 +195,31 @@ def build_threat(entries: Iterable[dict]) -> dict:
     technique_ids: list[str] = []
     technique_names: list[str] = []
     technique_refs: list[str] = []
+    subtechnique_ids: list[str] = []
+    subtechnique_names: list[str] = []
+    subtechnique_refs: list[str] = []
     tactic_ids: list[str] = []
     tactic_names: list[str] = []
     tactic_refs: list[str] = []
+    technique_index = _technique_index()
+
+    def add_technique(technique_id: str, name: Any, reference: str | None) -> None:
+        if technique_id in technique_ids:
+            return
+        technique_ids.append(technique_id)
+        if name:
+            technique_names.append(str(name))
+        if reference:
+            technique_refs.append(reference)
+
+    def add_subtechnique(technique_id: str, name: Any, reference: str | None) -> None:
+        if technique_id in subtechnique_ids:
+            return
+        subtechnique_ids.append(technique_id)
+        if name:
+            subtechnique_names.append(str(name))
+        if reference:
+            subtechnique_refs.append(reference)
 
     for entry in entries or []:
         if not isinstance(entry, dict):
@@ -188,16 +227,22 @@ def build_threat(entries: Iterable[dict]) -> dict:
         technique_id = normalise_technique(entry.get("id"))
         if technique_id is None:
             continue
-        # A repeated technique still contributes its tactics: the same task can map to one
-        # technique twice through different tactics.
-        if technique_id not in technique_ids:
-            technique_ids.append(technique_id)
-            name = entry.get("name")
-            if name:
-                technique_names.append(str(name))
-            reference = technique_reference(technique_id)
-            if reference:
-                technique_refs.append(reference)
+        dictionary_entry = technique_index.get(technique_id, {})
+        name = entry.get("name") or dictionary_entry.get("name")
+        reference = technique_reference(technique_id)
+        add_technique(technique_id, name, reference)
+
+        # ECS has a dedicated sub-technique object. Keep the sub-technique in the existing
+        # technique arrays as well, then add its parent for backwards-compatible roll-up counts.
+        if "." in technique_id:
+            add_subtechnique(technique_id, name, reference)
+            parent_id = dictionary_entry.get("parent") or technique_id.split(".", 1)[0]
+            parent_entry = technique_index.get(str(parent_id), {})
+            add_technique(
+                str(parent_id),
+                parent_entry.get("name"),
+                parent_entry.get("url") or technique_reference(str(parent_id)),
+            )
 
         for tactic in entry.get("tactics") or []:
             resolved = lookup_tactic(tactic)
@@ -222,6 +267,13 @@ def build_threat(entries: Iterable[dict]) -> dict:
         technique["name"] = technique_names
     if technique_refs:
         technique["reference"] = technique_refs
+    if subtechnique_ids:
+        subtechnique: dict[str, Any] = {"id": subtechnique_ids}
+        if subtechnique_names:
+            subtechnique["name"] = subtechnique_names
+        if subtechnique_refs:
+            subtechnique["reference"] = subtechnique_refs
+        technique["subtechnique"] = subtechnique
 
     threat: dict[str, Any] = {"framework": FRAMEWORK, "technique": technique}
     if tactic_ids or tactic_names:

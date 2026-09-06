@@ -6,7 +6,8 @@ layer you can drop straight into a report.
 Three things happen, in order:
 
 1. **Collection** - a C2 framework reports technique *identifiers*, and Logstash (or an API
-   connector) writes them to `threat.technique.id[]`.
+   connector) writes them to `threat.technique.id[]`. API connectors also split reported
+   sub-techniques into `threat.technique.subtechnique.*` immediately.
 2. **Enrichment** - `enrich_ttp` resolves those identifiers into names, tactics and references from
    the ATT&CK dictionary RedELK ships.
 3. **Export** - the same module writes an ATT&CK Navigator layer to `/c2logs`.
@@ -27,9 +28,9 @@ Not every framework reports ATT&CK data, and those that do report different amou
 | Outflank Stage1 | Same as Outflank C2 - same connector and command-name map. | same |
 
 The two paths meet in the same fields. When a C2 supplies only identifiers, `enrich_ttp` resolves
-the rest; when the API connector already wrote `threat.technique.name`, `enrich_ttp` leaves the
-document alone, because its query selects documents that have `threat.technique.id` and **no**
-`threat.technique.name`.
+the rest, including the dedicated sub-technique object. When the API connector already wrote
+`threat.technique.name`, it also wrote the sub-technique fields and parent roll-up, so
+`enrich_ttp` can leave that document alone.
 
 The Cobalt Strike filter is strict about what it accepts:
 
@@ -59,6 +60,9 @@ Written by `enrich_ttp` (`modules/enrich_ttp/`), mapped in the `redelk-threat` c
 | `threat.technique.name[]` | Technique names, in the same order. |
 | `threat.technique.reference[]` | `https://attack.mitre.org/techniques/...` |
 | `threat.technique.original_id[]` | Only present when RedELK rewrote an identifier: the ids exactly as the C2 reported them. `threat.technique.original_id:*` answers "what did RedELK remap?". |
+| `threat.technique.subtechnique.id[]` | Only the canonical sub-technique ids (`T1055.011`, ...), without parent techniques. |
+| `threat.technique.subtechnique.name[]` | Sub-technique names. |
+| `threat.technique.subtechnique.reference[]` | Links to the sub-technique pages on attack.mitre.org. |
 | `threat.tactic.id[]` | Tactic ids (`TA0009`, ...) of every technique on the document. |
 | `threat.tactic.name[]` | Tactic names (`Collection`, ...). |
 | `threat.tactic.reference[]` | `https://attack.mitre.org/tactics/...` |
@@ -69,9 +73,11 @@ Written by `enrich_ttp` (`modules/enrich_ttp/`), mapped in the `redelk-threat` c
 
 Semantics that matter when you count things:
 
-- **Sub-techniques roll up.** A document tasked with `T1055.011` indexes both `T1055.011` and
-  `T1055`, sub-technique first, so a `terms` aggregation gives you coverage at both levels without
-  a prefix query. The same document is counted once per level, never twice at the same level.
+- **Sub-techniques are explicit and roll up.** A document tasked with `T1055.011` writes
+  `T1055.011` to `threat.technique.subtechnique.id` and indexes both `T1055.011` and `T1055` in
+  `threat.technique.id`, sub-technique first. Aggregate the dedicated field for pure
+  sub-technique coverage, or the existing technique field for backwards-compatible parent
+  roll-up. The same document is counted once per level, never twice at the same level.
 - **Revoked ids are rewritten.** Frameworks pin an ATT&CK version and keep emitting identifiers
   MITRE has since revoked. `enrich_ttp` follows the revocation chain (bounded at 10 hops, so a
   cycle in the source data cannot hang the daemon) and indexes the identifier MITRE wants used
@@ -181,6 +187,12 @@ Options: `--output`, `--index` (default `rtops-*`), `--days`, `--start`, `--end`
 ```
 # everything RedELK saw for one technique, including via its sub-techniques
 threat.technique.id:T1055
+
+# only one exact sub-technique (parents never match this field)
+threat.technique.subtechnique.id:T1055.011
+
+# every event with explicit sub-technique coverage
+threat.technique.subtechnique.id:*
 
 # techniques the C2 reported that ATT&CK does not know
 tags:enrich_ttp_unknown_technique

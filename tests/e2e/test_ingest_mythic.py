@@ -165,6 +165,8 @@ def test_threat_fields_are_populated_and_aggregatable(elasticsearch, seed_mythic
         for attacktask in row.get("attacktasks") or []
         if (attacktask.get("attack") or {}).get("t_num")
     }
+    expected_subtechniques = {technique for technique in expected_techniques if "." in technique}
+    expected_techniques |= {technique.split(".", 1)[0] for technique in expected_subtechniques}
     assert expected_techniques, "the recorded tasks carry no ATT&CK techniques - wrong fixture?"
 
     elasticsearch.refresh("rtops-*")
@@ -175,17 +177,26 @@ def test_threat_fields_are_populated_and_aggregatable(elasticsearch, seed_mythic
             "query": scoped(seed_mythic.server_name),
             "aggs": {
                 "techniques": {"terms": {"field": "threat.technique.id", "size": 100}},
+                "subtechniques": {
+                    "terms": {"field": "threat.technique.subtechnique.id", "size": 100}
+                },
                 "tactics": {"terms": {"field": "threat.tactic.name", "size": 100}},
             },
         },
     )
     techniques = {bucket["key"] for bucket in result["aggregations"]["techniques"]["buckets"]}
+    subtechniques = {bucket["key"] for bucket in result["aggregations"]["subtechniques"]["buckets"]}
     tactics = {bucket["key"] for bucket in result["aggregations"]["tactics"]["buckets"]}
 
     assert techniques == expected_techniques, (
         "threat.technique.id does not aggregate to the recorded techniques: missing "
         f"{sorted(expected_techniques - techniques)}, unexpected "
         f"{sorted(techniques - expected_techniques)}"
+    )
+    assert subtechniques == expected_subtechniques, (
+        "threat.technique.subtechnique.id does not aggregate to the recorded sub-techniques: "
+        f"missing {sorted(expected_subtechniques - subtechniques)}, unexpected "
+        f"{sorted(subtechniques - expected_subtechniques)}"
     )
     assert tactics, "threat.tactic.name returned no buckets"
 

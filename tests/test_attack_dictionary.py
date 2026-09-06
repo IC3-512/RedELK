@@ -91,3 +91,20 @@ def test_an_unreadable_dictionary_raises_rather_than_serving_a_stale_one(attack,
 
     with pytest.raises(attack.AttackDictionaryError):
         attack.AttackDictionary.load(str(broken))
+
+
+def test_subtechniques_are_explicit_and_still_roll_up_to_their_parent(attack):
+    enriched = attack.AttackDictionary.load().enrich(["T1055.011"])["threat"]
+    technique = enriched["technique"]
+
+    assert technique["id"] == ["T1055.011", "T1055"]
+    assert technique["name"] == ["Extra Window Memory Injection", "Process Injection"]
+    assert technique["reference"] == [
+        "https://attack.mitre.org/techniques/T1055/011/",
+        "https://attack.mitre.org/techniques/T1055/",
+    ]
+    assert technique["subtechnique"] == {
+        "id": ["T1055.011"],
+        "name": ["Extra Window Memory Injection"],
+        "reference": ["https://attack.mitre.org/techniques/T1055/011/"],
+    }

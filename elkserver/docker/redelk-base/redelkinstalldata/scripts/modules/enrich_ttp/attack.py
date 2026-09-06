@@ -220,6 +220,9 @@ class AttackDictionary:
         technique_ids = []
         technique_names = []
         technique_refs = []
+        subtechnique_ids = []
+        subtechnique_names = []
+        subtechnique_refs = []
         tactic_ids = []
         tactic_names = []
         tactic_refs = []
@@ -236,6 +239,15 @@ class AttackDictionary:
                 technique_names.append(name)
             if reference:
                 technique_refs.append(reference)
+
+        def add_subtechnique(technique_id, name, reference):
+            if technique_id in subtechnique_ids:
+                return
+            subtechnique_ids.append(technique_id)
+            if name:
+                subtechnique_names.append(name)
+            if reference:
+                subtechnique_refs.append(reference)
 
         def add_tactics(tactics):
             for tactic in tactics:
@@ -268,6 +280,7 @@ class AttackDictionary:
             # A sub-technique also counts as its parent, so coverage adds up at both levels.
             parent = self.get(resolution["parent"]) if resolution["parent"] else None
             if parent is not None:
+                add_subtechnique(resolution["id"], resolution["name"], resolution["reference"])
                 add_technique(resolution["parent"], parent.get("name"), parent.get("url"))
                 add_tactics(
                     [t for t in parent.get("tactics") or [] if isinstance(t, dict) and t.get("id")]
@@ -281,6 +294,13 @@ class AttackDictionary:
             technique["name"] = technique_names
         if technique_refs:
             technique["reference"] = technique_refs
+        if subtechnique_ids:
+            subtechnique = {"id": subtechnique_ids}
+            if subtechnique_names:
+                subtechnique["name"] = subtechnique_names
+            if subtechnique_refs:
+                subtechnique["reference"] = subtechnique_refs
+            technique["subtechnique"] = subtechnique
         # Only kept when an identifier was actually rewritten, so that a search for
         # threat.technique.original_id:* answers "which documents did RedELK remap?".
         if changed:

@@ -118,6 +118,17 @@ def test_every_index_template_has_patterns_and_a_template_block(path):
     assert "mappings" in template or "settings" in template
 
 
+def test_threat_template_maps_ecs_subtechnique_fields_as_aggregatable():
+    path = TEMPLATES / "component" / "redelk-threat.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    subtechnique = document["template"]["mappings"]["properties"]["threat"]["properties"][
+        "technique"
+    ]["properties"]["subtechnique"]["properties"]
+
+    assert set(subtechnique) == {"id", "name", "reference"}
+    assert all(field["type"] == "keyword" for field in subtechnique.values())
+
+
 @pytest.mark.parametrize("path", INDEX_TEMPLATES, ids=lambda path: path.name)
 def test_every_index_template_composes_only_existing_components(path):
     """Elasticsearch rejects the whole template when a composed_of entry does not exist."""

@@ -237,6 +237,9 @@ regularly carries several techniques.
 | `threat.technique.name` | keyword (+text) | ECS | module | Technique names looked up from the ATT&CK data |
 | `threat.technique.reference` | keyword | ECS | module | Links to the technique pages on attack.mitre.org |
 | `threat.technique.original_id` | keyword | RedELK | module | The id the C2 reported, kept when ATT&CK has revoked it and `enrich_ttp` rewrote it to its replacement |
+| `threat.technique.subtechnique.id` | keyword | ECS | module, connector | Sub-technique ids only, e.g. `T1055.011`; parent techniques are excluded from this field |
+| `threat.technique.subtechnique.name` | keyword (+text) | ECS | module, connector | Sub-technique names |
+| `threat.technique.subtechnique.reference` | keyword | ECS | module, connector | Links to the sub-technique pages on attack.mitre.org |
 | `threat.tactic.id` | keyword | ECS | module | Tactic ids the techniques belong to, e.g. `TA0009` |
 | `threat.tactic.name` | keyword (+text) | ECS | module | Tactic names, e.g. `Collection` |
 | `threat.tactic.reference` | keyword | ECS | module | Links to the tactic pages on attack.mitre.org |
@@ -525,6 +528,7 @@ the modules read the existing array and write it back with their own tag appende
 | `creds.*` | x | | x (out of `c2.command.arguments`) | | x | x |
 | `ioc.type` | x | | | | x | x |
 | `threat.technique.id` | x (from `<T1113>` markers) | | | | x (command metadata) | x (command metadata) |
+| `threat.technique.subtechnique.*` | x (after enrichment) | | | | x (at ingest) | x (after enrichment) |
 | `screenshot.*` | x | `screenshot.full` only | | | x | x |
 | `keystrokes.*` | x | | | | | |
 | `c2.operation`, `c2.server`, `c2.task.*` | | | | | x | x |
