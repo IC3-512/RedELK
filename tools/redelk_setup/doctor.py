@@ -82,6 +82,13 @@ class Report:
 # --------------------------------------------------------------------------------------------
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Return redirect responses to the caller instead of following them."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _request(
     url: str,
     *,
@@ -92,6 +99,7 @@ def _request(
     method: str = "GET",
     data: bytes | None = None,
     timeout: int = 10,
+    follow_redirects: bool = True,
 ) -> tuple[int, bytes]:
     """Minimal HTTP client. Returns (status, body); raises only on transport errors."""
     context = (
@@ -109,7 +117,15 @@ def _request(
         request.add_header("Authorization", f"Basic {token}")
 
     try:
-        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+        if follow_redirects:
+            response = urllib.request.urlopen(request, timeout=timeout, context=context)
+        else:
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPSHandler(context=context),
+                _NoRedirectHandler(),
+            )
+            response = opener.open(request, timeout=timeout)
+        with response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -748,6 +764,10 @@ def _check_c2_apis(cfg: config_module.Config, report: Report) -> None:
                     ),
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                     timeout=15,
+                    # A successful OC2 login is a 302 carrying the JWT cookie. urllib follows it
+                    # to the authenticated UI without retaining that cookie and sees a 401,
+                    # turning valid credentials into a false doctor failure.
+                    follow_redirects=False,
                 )
                 if status in (200, 302):
                     report.add(name, OK, f"{C2_TYPES[c2.type]['label']} API reachable at {url}")

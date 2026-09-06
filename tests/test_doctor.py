@@ -13,6 +13,10 @@ Authors:
 
 from __future__ import annotations
 
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
+
 import pytest
 
 from redelk_setup import doctor
@@ -88,3 +92,54 @@ def test_a_garbage_value_does_not_crash_the_whole_doctor_run(monkeypatch, tmp_pa
     monkeypatch.setattr(doctor, "Path", lambda *a: bad)
 
     assert doctor._read_max_map_count() is None
+
+
+def test_outflank_auth_accepts_the_login_redirect_without_following_it(report):
+    """Stage1's successful POST redirects to a UI that needs the cookie from that response.
+
+    urllib's default redirect handler does not retain the JWT cookie, so following the redirect
+    changes a valid 302 login into a final 401 and doctor reports working credentials as broken.
+    """
+
+    class OutflankAuth(BaseHTTPRequestHandler):
+        methods: list[str] = []
+
+        def do_POST(self):
+            self.methods.append("POST")
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", "access_token_cookie=test; Path=/")
+            self.end_headers()
+
+        def do_GET(self):
+            self.methods.append("GET")
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), OutflankAuth)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        c2 = SimpleNamespace(
+            name="outflank",
+            type="outflankc2",
+            api={
+                "url": f"http://127.0.0.1:{server.server_port}",
+                "username": "redelk",
+                "password": "join-key",
+                "verify_tls": False,
+            },
+        )
+        cfg = SimpleNamespace(c2_by_ingest=lambda _ingest: [c2])
+
+        doctor._check_c2_apis(cfg, report)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
+
+    assert statuses(report) == [("c2 outflank", doctor.OK)]
+    assert OutflankAuth.methods == ["POST"]
